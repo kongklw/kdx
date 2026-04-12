@@ -62,6 +62,41 @@ services:
     tty: true
     stdin_open: true
 
+  voice_ws:
+    build: kdemo
+    entrypoint: ["/bin/bash", "-lc", "uvicorn voice_ws_server:app --host 0.0.0.0 --port 8001"]
+    env_file:
+      - kdemo/.env
+    expose:
+      - "8001"
+    volumes:
+      - ./kdemo:/home/kdemo
+    networks:
+      - nginx_network
+    depends_on:
+      - web
+    restart: always
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: kdemo_fastapi/Dockerfile
+    env_file:
+      - kdemo/.env
+    expose:
+      - "8002"
+    volumes:
+      - ./kdemo_fastapi:/app
+      - ./kdemo:/work/kdemo
+    networks:
+      - nginx_network
+      - db_network
+      - redis_network
+    depends_on:
+      - db
+      - redis
+    restart: always
+
   nginx:
     build: ./compose/nginx
     ports:
@@ -80,4 +115,6 @@ services:
       - nginx_network
     depends_on:
       - web
+      - voice_ws
+      - fastapi
     restart: always
