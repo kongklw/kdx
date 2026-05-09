@@ -101,9 +101,9 @@ draw_butterfly(160, 40, (255, 245, 157)) # Yellow butterfly
 draw_butterfly(30, 140, (244, 143, 177)) # Pink butterfly
 
 # 5. 保存
-output_path = r'c:\Users\konglingwen\code\django-vue-docker\kdemo-fe\public\logo.png'
+output_path = r'c:\Users\konglingwen\code\django-vue-docker\kdx-fe\public\logo.png'
 # 也覆盖之前的 apple-touch-icon
-output_path_icon = r'c:\Users\konglingwen\code\django-vue-docker\kdemo-fe\public\apple-touch-icon.png'
+output_path_icon = r'c:\Users\konglingwen\code\django-vue-docker\kdx-fe\public\apple-touch-icon.png'
 img.save(output_path)
 img.save(output_path_icon)
 print(f"Logo generated at: {output_path}")

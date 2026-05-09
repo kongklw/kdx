@@ -2,7 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/kdemo" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/kdemo-fe" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/kdx-be" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/kdx-fe" vcs="Git" />
   </component>
 </project>

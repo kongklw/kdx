@@ -1,57 +1,115 @@
-name: Deploy to Server
+name: Smart Deploy
 
 on:
   push:
-    branches:
-      - main
-      - master
-    paths-ignore:
-      - 'README.md'
-      - 'LICENSE'
-      - '.gitignore'
+    branches: [main]
+
+env:
+  SSH_HOST: ${{ secrets.SSH_HOST }}
+  SSH_USER: ${{ secrets.SSH_USER }}
+  SSH_KEY: ${{ secrets.SSH_KEY }}
+  PROJECT_PATH: /data/kdx
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_modules: ${{ steps.detect.outputs.changed_modules }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect changed modules
+        id: detect
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          MODULES=""
+          
+          # 检测后端变更
+          if echo "$CHANGED_FILES" | grep -qE "^kdx-be/"; then
+            MODULES="$MODULES backend,"
+          fi
+          
+          # 检测前端变更
+          if echo "$CHANGED_FILES" | grep -qE "^kdx-fe/"; then
+            MODULES="$MODULES frontend,"
+          fi
+          
+          # 检测WebSocket后端变更
+          if echo "$CHANGED_FILES" | grep -qE "^kdx-ws-be/"; then
+            MODULES="$MODULES fastapi,"
+          fi
+          
+          # 检测配置变更（影响所有服务）
+          if echo "$CHANGED_FILES" | grep -qE "^compose/|^docker-compose\.yaml"; then
+            MODULES="$MODULES nginx,"
+          fi
+          
+          # 移除末尾逗号
+          MODULES=$(echo "$MODULES" | sed 's/,$//')
+          
+          # 如果没有检测到具体模块变更，默认部署所有
+          if [ -z "$MODULES" ]; then
+            MODULES="backend,frontend,fastapi,nginx"
+          fi
+          
+          echo "Changed modules: $MODULES"
+          echo "changed_modules=$MODULES" >> $GITHUB_OUTPUT
+
   deploy:
+    needs: detect-changes
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Zip Backend Code
-        run: zip -r backend.zip kdemo/ compose/ -x "kdemo/media/*" "kdemo/static/*" "kdemo/frontend/dist.zip" "*/__pycache__/*" "*/.git/*" "*.pyc"
-
-      # ----------------------------------------------------------------
-      # 2. 部署到服务器 (Deploy to Server)
-      # ----------------------------------------------------------------
-
-      - name: Upload Backend Code to Server
-        uses: appleboy/scp-action@master
+      - uses: actions/checkout@v4
+      
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          source: "backend.zip,docker-compose.yaml"
-          target: "${{ secrets.PROJECT_PATH }}/"
-
-      - name: Deploy to ECS
-        uses: appleboy/ssh-action@v0.1.8
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ env.SSH_KEY }}
           script: |
             set -e
-            cd ${{ secrets.PROJECT_PATH }}
+            cd ${{ env.PROJECT_PATH }}
             
-            if [ -f "backend.zip" ]; then
-              echo "Unzipping backend code..."
-              unzip -o backend.zip
-              rm backend.zip
+            echo "=== 拉取最新代码 ==="
+            git pull origin main
+            
+            MODULES="${{ needs.detect-changes.outputs.changed_modules }}"
+            echo "需要部署的模块: $MODULES"
+            
+            # 部署后端
+            if echo "$MODULES" | grep -q "backend"; then
+              echo "=== 部署后端 (kdx-be) ==="
+              docker-compose up -d --build --no-deps web
+              docker-compose exec -T kdx-be python manage.py migrate --noinput
+              docker-compose exec -T kdx-be python manage.py collectstatic --noinput
             fi
             
-            if command -v docker-compose >/dev/null 2>&1; then dc="docker-compose"; else dc="docker compose"; fi
-            $dc build web
-            $dc up -d web
-            $dc up -d --force-recreate nginx
-            $dc exec -T web python manage.py migrate
-            $dc exec -T web python manage.py collectstatic --noinput
+            # 部署前端
+            if echo "$MODULES" | grep -q "frontend"; then
+              echo "=== 部署前端 (kdx-fe) ==="
+              cd kdx-fe
+              npm ci --only=production
+              npm run build
+              cd ..
+              docker-compose up -d --build --no-deps nginx
+            fi
+            
+            # 部署FastAPI
+            if echo "$MODULES" | grep -q "fastapi"; then
+              echo "=== 部署WebSocket后端 (kdx-ws-be) ==="
+              docker-compose up -d --build --no-deps fastapi
+            fi
+            
+            # 部署Nginx
+            if echo "$MODULES" | grep -q "nginx"; then
+              echo "=== 部署Nginx ==="
+              docker-compose up -d --build --no-deps nginx
+            fi
+            
+            echo "✅ 部署完成！"

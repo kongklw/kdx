@@ -1,12 +1,11 @@
 version: "3"
 
-volumes: # 自定义数据卷
-  db_vol: #定义数据卷同步存放容器内mysql数据
-  redis_vol: #定义数据卷同步存放redis数据
-  media_vol: #定义数据卷同步存放web项目用户上传到media文件夹的数据
-  #static_vol: #定义数据卷同步存放web项目static文件夹的数据
+volumes:
+  db_vol:
+  redis_vol:
+  media_vol:
 
-networks: # 自定义网络(默认桥接), 不使用links通信
+networks:
   nginx_network:
     driver: bridge
   db_network:
@@ -17,40 +16,38 @@ networks: # 自定义网络(默认桥接), 不使用links通信
 services:
   redis:
     image: redis:latest
-    command: redis-server /etc/redis/redis.conf # 容器启动后启动redis服务器
+    command: redis-server /etc/redis/redis.conf
     networks:
       - redis_network
     volumes:
-      - redis_vol:/data # 通过挂载给redis数据备份
-      - ./compose/redis/redis.conf:/etc/redis/redis.conf # 挂载redis配置文件
+      - redis_vol:/data
+      - ./compose/redis/redis.conf:/etc/redis/redis.conf
     ports:
       - "6379:6379"
-    restart: always # always表容器运行发生错误时一直重启
+    restart: always
 
   db:
     image: mysql:latest
     env_file:
-      - kdemo/.env # 使用了环境变量文件
+      - kdx-be/.env
     networks:
       - db_network
     volumes:
-      - db_vol:/var/lib/mysql:rw # 挂载数据库数据, 可读可写
-      - ./compose/mysql/conf/my.cnf:/etc/mysql/my.cnf # 挂载配置文件
-      - ./compose/mysql/init:/docker-entrypoint-initdb.d/ # 挂载数据初始化sql脚本
+      - db_vol:/var/lib/mysql:rw
+      - ./compose/mysql/conf/my.cnf:/etc/mysql/my.cnf
+      - ./compose/mysql/init:/docker-entrypoint-initdb.d/
     ports:
-      - "3306:3306" # 与配置文件保持一致
+      - "3306:3306"
     restart: always
 
   web:
-    build: kdemo
-    # expose 暴露容器给link到当前容器的容器,区别port是，不会将端口暴露给主机。
+    build: kdx-be
     expose:
       - "8000"
     volumes:
-      - ./kdemo:/home/kdemo # 挂载项目代码
-      #- static_vol:/home/kdemo/static # 以数据卷挂载容器内static文件
-      - media_vol:/home/kdemo/media # 以数据卷挂载容器内用户上传媒体文件
-      - ./compose/uwsgi:/tmp # 挂载uwsgi日志
+      - ./kdx-be:/home/kdx-be
+      - media_vol:/home/kdx-be/media
+      - ./compose/uwsgi:/tmp
     networks:
       - nginx_network
       - db_network
@@ -61,33 +58,35 @@ services:
     restart: always
     tty: true
     stdin_open: true
+    container_name: kdx-be
 
   voice_ws:
-    build: kdemo
+    build: kdx-be
     entrypoint: ["/bin/bash", "-lc", "uvicorn voice_ws_server:app --host 0.0.0.0 --port 8001"]
     env_file:
-      - kdemo/.env
+      - kdx-be/.env
     expose:
       - "8001"
     volumes:
-      - ./kdemo:/home/kdemo
+      - ./kdx-be:/home/kdx-be
     networks:
       - nginx_network
     depends_on:
       - web
     restart: always
+    container_name: kdx-ws
 
   fastapi:
     build:
       context: .
-      dockerfile: kdemo_fastapi/Dockerfile
+      dockerfile: kdx-ws-be/Dockerfile
     env_file:
-      - kdemo/.env
+      - kdx-be/.env
     expose:
       - "8002"
     volumes:
-      - ./kdemo_fastapi:/app
-      - ./kdemo:/work/kdemo
+      - ./kdx-ws-be:/app
+      - ./kdx-be:/work/kdx-be
     networks:
       - nginx_network
       - db_network
@@ -96,6 +95,7 @@ services:
       - db
       - redis
     restart: always
+    container_name: kdx-ws-be
 
   nginx:
     build: ./compose/nginx
@@ -105,12 +105,11 @@ services:
     expose:
       - "80"
     volumes:
-      - ./compose/nginx/default.conf:/etc/nginx/conf.d/default.conf # 挂载nginx配置文件
-      - ./compose/nginx/ssl:/usr/share/nginx/ssl # 挂载ssl证书目录
-      - ./compose/nginx/log:/var/log/nginx # 挂载日志
-      - ./frontend:/usr/share/nginx/html # 挂载前端静态文件（与后端完全隔离）
-      #- static_vol:/usr/share/nginx/html/static # 挂载静态文件
-      - media_vol:/usr/share/nginx/html/media # 挂载用户上传媒体文件
+      - ./compose/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./compose/nginx/ssl:/usr/share/nginx/ssl
+      - ./compose/nginx/log:/var/log/nginx
+      - ./kdx-fe/dist:/usr/share/nginx/html
+      - media_vol:/usr/share/nginx/html/media
     networks:
       - nginx_network
     depends_on:
@@ -118,3 +117,4 @@ services:
       - voice_ws
       - fastapi
     restart: always
+    container_name: kdx-nginx

@@ -74,6 +74,6 @@ smile_box = [60, 130, 120, 150]
 draw.arc(smile_box, 0, 180, fill=text_color, width=6)
 
 # 5. 保存
-output_path = r'c:\Users\konglingwen\code\django-vue-docker\kdemo-fe\public\apple-touch-icon.png'
+output_path = r'c:\Users\konglingwen\code\django-vue-docker\kdx-fe\public\apple-touch-icon.png'
 img.save(output_path)
 print(f"Icon generated at: {output_path}")
