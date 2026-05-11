@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 # 项目路径
 PROJECT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DOCKER_COMPOSE="docker-compose"
-MAX_WAIT=60
+MAX_WAIT=300
 CHECK_INTERVAL=2
 
 # 检查 docker-compose 命令
@@ -42,8 +42,35 @@ is_service_running() {
     ${DOCKER_COMPOSE} ps -q "$service" | grep -q .
 }
 
-# 检查服务是否健康
-wait_for_service() {
+# 检查容器是否健康（根据容器名检查）
+wait_for_container() {
+    local container_name=$1
+    local timeout=${2:-$MAX_WAIT}
+    
+    echo -e "${BLUE}等待 ${container_name} 容器就绪...${NC}"
+    
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        if ${DOCKER_COMPOSE} ps -q "$container_name" | grep -q .; then
+            # 检查容器状态是否为 running
+            local status=$(${DOCKER_COMPOSE} ps -a --filter "name=$container_name" --format "{{.State}}")
+            if [ "$status" = "running" ]; then
+                echo -e "${GREEN}${container_name} 容器已就绪${NC}"
+                return 0
+            fi
+        fi
+        sleep $CHECK_INTERVAL
+        elapsed=$((elapsed + CHECK_INTERVAL))
+        echo -ne "${YELLOW}.${NC}"
+    done
+    
+    echo -e "\n${RED}错误: ${container_name} 容器启动超时${NC}"
+    ${DOCKER_COMPOSE} logs "$container_name" | tail -20
+    return 1
+}
+
+# 检查端口是否就绪（用于有端口映射的服务）
+wait_for_port() {
     local service=$1
     local port=$2
     local host=${3:-localhost}
@@ -54,12 +81,7 @@ wait_for_service() {
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
         if is_service_running "$service"; then
-            if [ -n "$port" ]; then
-                if timeout 1 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
-                    echo -e "${GREEN}${service} 服务已就绪${NC}"
-                    return 0
-                fi
-            else
+            if timeout 1 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
                 echo -e "${GREEN}${service} 服务已就绪${NC}"
                 return 0
             fi
@@ -139,8 +161,8 @@ deploy_backend() {
     # 构建并启动后端容器
     ${DOCKER_COMPOSE} up -d --build --no-deps web
 
-    # 等待容器启动
-    wait_for_service "web" "8000"
+    # 等待容器启动（web服务端口不对外映射，检查容器状态）
+    wait_for_container "web"
 
     # 执行数据库迁移
     echo -e "${BLUE}执行数据库迁移...${NC}"
@@ -157,7 +179,8 @@ deploy_backend() {
 deploy_fastapi() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps fastapi
-    wait_for_service "fastapi" "8002"
+    # FastAPI端口不对外映射，检查容器状态
+    wait_for_container "fastapi"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
 
@@ -172,7 +195,8 @@ deploy_nginx() {
     fi
     
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
-    wait_for_service "nginx" "80"
+    # Nginx有端口映射，检查端口
+    wait_for_port "nginx" "80"
     echo -e "${GREEN}Nginx 部署完成！${NC}"
 }
 
@@ -180,13 +204,13 @@ deploy_nginx() {
 deploy_middleware() {
     echo -e "${YELLOW}=== 部署中间件服务 (MySQL + Redis) ===${NC}"
     
-    # 启动 Redis
+    # 启动 Redis（有端口映射）
     ${DOCKER_COMPOSE} up -d --build --no-deps redis
-    wait_for_service "redis" "6379"
+    wait_for_port "redis" "6379"
     
-    # 启动 MySQL
+    # 启动 MySQL（有端口映射）
     ${DOCKER_COMPOSE} up -d --build --no-deps db
-    wait_for_service "db" "3306"
+    wait_for_port "db" "3306"
     
     echo -e "${GREEN}中间件服务部署完成！${NC}"
 }
@@ -202,7 +226,8 @@ deploy_voice_ws() {
     fi
     
     ${DOCKER_COMPOSE} up -d --build --no-deps voice_ws
-    wait_for_service "voice_ws" "8001"
+    # voice_ws端口不对外映射，检查容器状态
+    wait_for_container "voice_ws"
     echo -e "${GREEN}语音 WebSocket 部署完成！${NC}"
 }
 
