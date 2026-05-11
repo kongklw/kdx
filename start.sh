@@ -162,7 +162,7 @@ build_frontend() {
     fi
 
     echo -e "${BLUE}执行构建...${NC}"
-    npm run build
+    npm run build:prod
 
     cd "${PROJECT_PATH}"
 }
