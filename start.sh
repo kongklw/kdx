@@ -154,10 +154,10 @@ build_frontend() {
         echo -e "${BLUE}安装依赖...${NC}"
         # 检查是否存在 package-lock.json
         if [ -f "package-lock.json" ]; then
-            npm ci --only=production
+            npm ci
         else
-            # 如果没有 lock 文件，使用 npm install
-            npm install --omit=dev
+            # 如果没有 lock 文件，使用 npm install（安装全部依赖，包括开发依赖）
+            npm install
         fi
     fi
 
