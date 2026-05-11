@@ -1,0 +1,53 @@
+# 建立 python 3.9环境
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
+
+# 替换软件源为阿里云
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
+# 安装系统依赖 (mysqlclient 需要)
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    default-libmysqlclient-dev \
+    build-essential \
+    netcat-openbsd \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# image author
+MAINTAINER kdemo
+
+# 设置 python 环境变量
+ENV PYTHONDONTWRITEBYTECODE 1
+ENV PYTHONUNBUFFERED 1
+
+# 可选：设置镜像源为国内
+COPY pip.conf /root/.pip/pip.conf
+
+# 容器内创建 myproject 文件夹
+ENV APP_HOME=/home/kdemo
+RUN mkdir -p $APP_HOME
+WORKDIR $APP_HOME
+
+# 将当前目录加入到工作目录中（. 表示当前目录）
+ADD . $APP_HOME
+
+# 解压打包后的前端静态文件
+# RUN tar -xvf frontend/dist.tar --strip-components 1 -C frontend
+# RUN unzip -o frontend/dist.zip -d frontend/
+# 更新pip版本
+RUN /usr/local/bin/python -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/
+
+# 安装项目依赖
+RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+RUN uwsgi --version
+
+# 移除\r in windows
+RUN sed -i 's/\r//' ./start.sh
+
+# 给start.sh可执行权限
+RUN chmod 777 ./start.sh
+
+# 数据迁移，并使用uwsgi启动服务
+ENTRYPOINT /bin/bash ./start.sh
+
