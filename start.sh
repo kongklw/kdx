@@ -163,16 +163,16 @@ deploy_backend() {
     # 构建并启动后端容器
     ${DOCKER_COMPOSE} up -d --build --no-deps web
 
-    # 等待容器启动（web服务端口不对外映射，检查容器状态）
+    # 等待容器启动（web 服务端口不对外映射，检查容器状态）
     wait_for_container "web"
 
-    # 执行数据库迁移
+    # 执行数据库迁移（使用 service 名称：web）
     echo -e "${BLUE}执行数据库迁移...${NC}"
-    ${DOCKER_COMPOSE} exec -T kdx-be python manage.py migrate --noinput
+    ${DOCKER_COMPOSE} exec -T web python manage.py migrate --noinput
 
     # 收集静态文件
     echo -e "${BLUE}收集静态文件...${NC}"
-    ${DOCKER_COMPOSE} exec -T kdx-be python manage.py collectstatic --noinput
+    ${DOCKER_COMPOSE} exec -T web python manage.py collectstatic --noinput
 
     echo -e "${GREEN}后端部署完成！${NC}"
 }
