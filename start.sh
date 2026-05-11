@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # KDX 项目一键部署脚本
-# 支持按需部署后端、前端、FastAPI、Nginx等模块
+# 支持按需部署，智能启动顺序，健康检查
 # ==============================================================================
 
 set -e
@@ -17,6 +17,8 @@ NC='\033[0m' # No Color
 # 项目路径
 PROJECT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DOCKER_COMPOSE="docker-compose"
+MAX_WAIT=60
+CHECK_INTERVAL=2
 
 # 检查 docker-compose 命令
 if ! command -v docker-compose &> /dev/null; then
@@ -33,6 +35,44 @@ if [ ! -f "${PROJECT_PATH}/docker-compose.yaml" ]; then
     echo -e "${RED}错误: 请在项目根目录运行此脚本${NC}"
     exit 1
 fi
+
+# 检查服务是否正在运行
+is_service_running() {
+    local service=$1
+    ${DOCKER_COMPOSE} ps -q "$service" | grep -q .
+}
+
+# 检查服务是否健康
+wait_for_service() {
+    local service=$1
+    local port=$2
+    local host=${3:-localhost}
+    local timeout=${4:-$MAX_WAIT}
+    
+    echo -e "${BLUE}等待 ${service} 服务就绪...${NC}"
+    
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        if is_service_running "$service"; then
+            if [ -n "$port" ]; then
+                if timeout 1 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
+                    echo -e "${GREEN}${service} 服务已就绪${NC}"
+                    return 0
+                fi
+            else
+                echo -e "${GREEN}${service} 服务已就绪${NC}"
+                return 0
+            fi
+        fi
+        sleep $CHECK_INTERVAL
+        elapsed=$((elapsed + CHECK_INTERVAL))
+        echo -ne "${YELLOW}.${NC}"
+    done
+    
+    echo -e "\n${RED}错误: ${service} 服务启动超时${NC}"
+    ${DOCKER_COMPOSE} logs "$service" | tail -20
+    return 1
+}
 
 # 显示帮助信息
 show_help() {
@@ -55,21 +95,25 @@ show_help() {
     echo ""
     echo -e "${YELLOW}模块（可选，不指定则部署全部）:${NC}"
     echo "  all          部署所有服务（默认）"
-    echo "  backend      仅部署后端 (Django)"
-    echo "  frontend     仅部署前端 (Vue)"
-    echo "  fastapi      仅部署 FastAPI 服务"
+    echo "  backend      仅部署后端 (Django) - 需要中间件已运行"
+    echo "  frontend     仅部署前端 (Vue) - 需要中间件已运行"
+    echo "  fastapi      仅部署 FastAPI 服务 - 需要中间件已运行"
     echo "  nginx        仅部署 Nginx"
-    echo "  db           仅部署数据库 (MySQL + Redis)"
-    echo "  voice_ws     仅部署语音 WebSocket 服务"
+    echo "  middleware   仅部署中间件 (MySQL + Redis)"
+    echo "  voice_ws     仅部署语音 WebSocket 服务 - 需要后端已运行"
     echo ""
     echo -e "${YELLOW}示例:${NC}"
-    echo "  $0                    # 启动所有服务"
-    echo "  $0 -b                 # 构建所有镜像"
-    echo "  $0 backend frontend   # 仅启动后端和前端"
+    echo "  $0                    # 启动所有服务（含中间件）"
+    echo "  $0 middleware         # 仅启动 MySQL + Redis"
+    echo "  $0 backend            # 仅重启后端（假设中间件已运行）"
     echo "  $0 -u backend         # 更新代码并部署后端"
-    echo "  $0 -r nginx           # 重启 Nginx"
-    echo "  $0 -l web             # 查看 web 容器日志"
+    echo "  $0 -r backend         # 重启后端"
+    echo "  $0 frontend           # 仅构建并部署前端"
     echo ""
+    echo -e "${YELLOW}部署策略:${NC}"
+    echo "  - 中间件(middleware): MySQL + Redis，通常不需要频繁重启"
+    echo "  - 代码服务: backend, frontend, fastapi, voice_ws，开发时频繁更新"
+    echo "  - 建议先启动 middleware，再按需启动代码服务"
 }
 
 # 构建前端
@@ -96,7 +140,7 @@ deploy_backend() {
     ${DOCKER_COMPOSE} up -d --build --no-deps web
 
     # 等待容器启动
-    sleep 5
+    wait_for_service "web" "8000"
 
     # 执行数据库迁移
     echo -e "${BLUE}执行数据库迁移...${NC}"
@@ -113,27 +157,52 @@ deploy_backend() {
 deploy_fastapi() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps fastapi
+    wait_for_service "fastapi" "8002"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
 
 # 部署 Nginx
 deploy_nginx() {
     echo -e "${YELLOW}=== 部署 Nginx ===${NC}"
+    
+    # 确保前端已构建
+    if [ ! -d "${PROJECT_PATH}/kdx-fe/dist" ]; then
+        echo -e "${BLUE}前端目录不存在，先构建前端...${NC}"
+        build_frontend
+    fi
+    
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
+    wait_for_service "nginx" "80"
     echo -e "${GREEN}Nginx 部署完成！${NC}"
 }
 
-# 部署数据库
-deploy_db() {
-    echo -e "${YELLOW}=== 部署数据库服务 ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-deps redis db
-    echo -e "${GREEN}数据库服务部署完成！${NC}"
+# 部署中间件 (MySQL + Redis)
+deploy_middleware() {
+    echo -e "${YELLOW}=== 部署中间件服务 (MySQL + Redis) ===${NC}"
+    
+    # 启动 Redis
+    ${DOCKER_COMPOSE} up -d --build --no-deps redis
+    wait_for_service "redis" "6379"
+    
+    # 启动 MySQL
+    ${DOCKER_COMPOSE} up -d --build --no-deps db
+    wait_for_service "db" "3306"
+    
+    echo -e "${GREEN}中间件服务部署完成！${NC}"
 }
 
 # 部署语音 WebSocket
 deploy_voice_ws() {
     echo -e "${YELLOW}=== 部署语音 WebSocket 服务 ===${NC}"
+    
+    # 检查后端是否运行
+    if ! is_service_running "web"; then
+        echo -e "${YELLOW}警告: 后端服务未运行，尝试启动后端...${NC}"
+        deploy_backend
+    fi
+    
     ${DOCKER_COMPOSE} up -d --build --no-deps voice_ws
+    wait_for_service "voice_ws" "8001"
     echo -e "${GREEN}语音 WebSocket 部署完成！${NC}"
 }
 
@@ -141,27 +210,30 @@ deploy_voice_ws() {
 deploy_all() {
     echo -e "${YELLOW}=== 部署所有服务 ===${NC}"
 
-    # 先部署数据库
-    deploy_db
+    # 步骤1: 部署中间件（MySQL + Redis）
+    echo -e "\n${BLUE}【步骤1/4】启动中间件${NC}"
+    deploy_middleware
 
-    # 部署后端
+    # 步骤2: 部署后端服务
+    echo -e "\n${BLUE}【步骤2/4】启动后端服务${NC}"
     deploy_backend
 
-    # 部署语音 WebSocket
+    # 步骤3: 部署其他代码服务
+    echo -e "\n${BLUE}【步骤3/4】启动 FastAPI 和 WebSocket${NC}"
+    deploy_fastapi
     deploy_voice_ws
 
-    # 部署 FastAPI
-    deploy_fastapi
-
-    # 构建前端
-    build_frontend
-
-    # 部署 Nginx
+    # 步骤4: 构建前端并部署 Nginx
+    echo -e "\n${BLUE}【步骤4/4】构建前端并启动 Nginx${NC}"
     deploy_nginx
 
-    echo -e "${GREEN}=============================================${NC}"
+    echo -e "\n${GREEN}=============================================${NC}"
     echo -e "${GREEN}          所有服务部署完成！                 ${NC}"
     echo -e "${GREEN}=============================================${NC}"
+    
+    # 显示服务状态
+    echo -e "\n${YELLOW}服务状态概览:${NC}"
+    ${DOCKER_COMPOSE} ps
 }
 
 # 拉取最新代码
@@ -211,7 +283,7 @@ main() {
                 action="clean"
                 shift
                 ;;
-            all|backend|frontend|fastapi|nginx|db|voice_ws)
+            all|backend|frontend|fastapi|nginx|middleware|voice_ws)
                 modules=("$1")
                 shift
                 ;;
@@ -246,8 +318,8 @@ main() {
                 nginx)
                     deploy_nginx
                     ;;
-                db)
-                    deploy_db
+                middleware)
+                    deploy_middleware
                     ;;
                 voice_ws)
                     deploy_voice_ws
@@ -279,7 +351,7 @@ main() {
                 nginx)
                     ${DOCKER_COMPOSE} restart nginx
                     ;;
-                db)
+                middleware)
                     ${DOCKER_COMPOSE} restart redis db
                     ;;
                 voice_ws)
@@ -308,7 +380,7 @@ main() {
                 nginx)
                     ${DOCKER_COMPOSE} build nginx
                     ;;
-                db)
+                middleware)
                     ${DOCKER_COMPOSE} build redis db
                     ;;
                 voice_ws)
@@ -337,8 +409,8 @@ main() {
                 nginx)
                     deploy_nginx
                     ;;
-                db)
-                    deploy_db
+                middleware)
+                    deploy_middleware
                     ;;
                 voice_ws)
                     deploy_voice_ws
@@ -364,7 +436,7 @@ main() {
                 nginx)
                     ${DOCKER_COMPOSE} logs -f nginx
                     ;;
-                db)
+                middleware)
                     ${DOCKER_COMPOSE} logs -f redis db
                     ;;
                 voice_ws)
