@@ -42,7 +42,7 @@ is_service_running() {
     ${DOCKER_COMPOSE} ps -q "$service" | grep -q .
 }
 
-# 检查容器是否健康（根据容器名检查）
+# 检查容器是否健康（兼容服务名和容器名）
 wait_for_container() {
     local container_name=$1
     local timeout=${2:-$MAX_WAIT}
@@ -51,8 +51,14 @@ wait_for_container() {
     
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
-        # 获取容器 ID
+        # 尝试通过服务名获取容器 ID
         local container_id=$(${DOCKER_COMPOSE} ps -q "$container_name" 2>/dev/null)
+        
+        # 如果服务名方式失败，尝试通过容器名直接查找
+        if [ -z "$container_id" ]; then
+            container_id=$(docker ps -q --filter "name=^/${container_name}$" 2>/dev/null)
+        fi
+        
         if [ -n "$container_id" ]; then
             # 使用 docker inspect 检查容器状态（兼容旧版本）
             local status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
@@ -67,7 +73,7 @@ wait_for_container() {
     done
     
     echo -e "\n${RED}错误: ${container_name} 容器启动超时${NC}"
-    ${DOCKER_COMPOSE} logs "$container_name" | tail -20
+    ${DOCKER_COMPOSE} logs "$container_name" 2>/dev/null | tail -20 || docker logs "$container_name" 2>/dev/null | tail -20
     return 1
 }
 
