@@ -60,33 +60,16 @@ services:
     stdin_open: true
     container_name: kdx-be
 
-  voice_ws:
-    build: kdx-be
-    entrypoint: ["/bin/bash", "-lc", "uvicorn voice_ws_server:app --host 0.0.0.0 --port 8001"]
-    env_file:
-      - kdx-be/.env
-    expose:
-      - "8001"
-    volumes:
-      - ./kdx-be:/home/kdx-be
-    networks:
-      - nginx_network
-    depends_on:
-      - web
-    restart: always
-    container_name: kdx-ws
-
-  fastapi:
+  kdx_ws:
     build:
       context: .
       dockerfile: kdx-ws-be/Dockerfile
     env_file:
-      - kdx-be/.env
+      - kdx-ws-be/.env
     expose:
-      - "8002"
+      - "8001"
     volumes:
       - ./kdx-ws-be:/app
-      - ./kdx-be:/work/kdx-be
     networks:
       - nginx_network
       - db_network
@@ -115,6 +98,5 @@ services:
     depends_on:
       - web
       - voice_ws
-      - fastapi
     restart: always
     container_name: kdx-nginx

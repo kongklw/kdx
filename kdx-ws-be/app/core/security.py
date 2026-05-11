@@ -1,7 +1,5 @@
 from typing import Any, Dict, Optional
-
 import jwt
-
 from .config import Settings
 
 
@@ -20,4 +18,3 @@ def verify_jwt(token: str, settings: Settings) -> Dict[str, Any]:
         algorithms=[settings.jwt_algorithm],
         options={"verify_aud": False},
     )
-

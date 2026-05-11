@@ -176,11 +176,11 @@ deploy_backend() {
 }
 
 # 部署 FastAPI
-deploy_fastapi() {
+deploy_kdx_ws() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-deps fastapi
+    ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
     # FastAPI端口不对外映射，检查容器状态
-    wait_for_container "fastapi"
+    wait_for_container "kdx_ws"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
 
@@ -215,21 +215,7 @@ deploy_middleware() {
     echo -e "${GREEN}中间件服务部署完成！${NC}"
 }
 
-# 部署语音 WebSocket
-deploy_voice_ws() {
-    echo -e "${YELLOW}=== 部署语音 WebSocket 服务 ===${NC}"
-    
-    # 检查后端是否运行
-    if ! is_service_running "web"; then
-        echo -e "${YELLOW}警告: 后端服务未运行，尝试启动后端...${NC}"
-        deploy_backend
-    fi
-    
-    ${DOCKER_COMPOSE} up -d --build --no-deps voice_ws
-    # voice_ws端口不对外映射，检查容器状态
-    wait_for_container "voice_ws"
-    echo -e "${GREEN}语音 WebSocket 部署完成！${NC}"
-}
+
 
 # 部署所有服务
 deploy_all() {
@@ -245,8 +231,8 @@ deploy_all() {
 
     # 步骤3: 部署其他代码服务
     echo -e "\n${BLUE}【步骤3/4】启动 FastAPI 和 WebSocket${NC}"
-    deploy_fastapi
-    deploy_voice_ws
+    deploy_kdx_ws
+
 
     # 步骤4: 构建前端并部署 Nginx
     echo -e "\n${BLUE}【步骤4/4】构建前端并启动 Nginx${NC}"
@@ -338,7 +324,7 @@ main() {
                     deploy_nginx
                     ;;
                 fastapi)
-                    deploy_fastapi
+                    deploy_kdx_ws
                     ;;
                 nginx)
                     deploy_nginx
@@ -346,9 +332,7 @@ main() {
                 middleware)
                     deploy_middleware
                     ;;
-                voice_ws)
-                    deploy_voice_ws
-                    ;;
+          
             esac
             ;;
 
@@ -429,7 +413,7 @@ main() {
                     deploy_nginx
                     ;;
                 fastapi)
-                    deploy_fastapi
+                    deploy_kdx_ws
                     ;;
                 nginx)
                     deploy_nginx
@@ -437,9 +421,7 @@ main() {
                 middleware)
                     deploy_middleware
                     ;;
-                voice_ws)
-                    deploy_voice_ws
-                    ;;
+              
             esac
             ;;
 

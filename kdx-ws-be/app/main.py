@@ -1,10 +1,13 @@
 from pathlib import Path
-
+import os
 from fastapi import FastAPI
 
 from .core.config import get_settings, load_env
 
-load_env(Path(__file__).resolve().parents[2] / "kdx-be" / ".env")
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+env_path =os.path.join(BASE_DIR, '.env')
+load_env(env_path)
 
 from .api.health import router as health_router
 from .api.todo import create_todo_router

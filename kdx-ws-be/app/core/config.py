@@ -3,11 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def load_env(default_env_path: Path) -> None:
-    try:
-        from dotenv import load_dotenv
-    except Exception:
-        return
+def load_env(default_env_path) -> None:
+    from dotenv import load_dotenv
     load_dotenv(default_env_path)
 
 
@@ -49,4 +46,3 @@ def get_settings() -> Settings:
         mysql_dsn=mysql_dsn,
         allow_anon_ws=allow_anon_ws,
     )
-
