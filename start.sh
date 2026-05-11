@@ -51,9 +51,11 @@ wait_for_container() {
     
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
-        if ${DOCKER_COMPOSE} ps -q "$container_name" | grep -q .; then
-            # 检查容器状态是否为 running
-            local status=$(${DOCKER_COMPOSE} ps -a --filter "name=$container_name" --format "{{.State}}")
+        # 获取容器 ID
+        local container_id=$(${DOCKER_COMPOSE} ps -q "$container_name" 2>/dev/null)
+        if [ -n "$container_id" ]; then
+            # 使用 docker inspect 检查容器状态（兼容旧版本）
+            local status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
             if [ "$status" = "running" ]; then
                 echo -e "${GREEN}${container_name} 容器已就绪${NC}"
                 return 0
