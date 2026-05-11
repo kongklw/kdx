@@ -95,8 +95,8 @@ services:
       - media_vol:/usr/share/nginx/html/media
     networks:
       - nginx_network
-    depends_on:
-      - web
-      - voice_ws
+#    depends_on:
+#      - web
+#      - voice_ws
     restart: always
     container_name: kdx-nginx
