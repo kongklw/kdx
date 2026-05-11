@@ -121,10 +121,9 @@ show_help() {
     echo "  all          部署所有服务（默认）"
     echo "  backend      仅部署后端 (Django) - 需要中间件已运行"
     echo "  frontend     仅部署前端 (Vue) - 需要中间件已运行"
-    echo "  fastapi      仅部署 FastAPI 服务 - 需要中间件已运行"
+    echo "  fastapi      仅部署 FastAPI 服务 (含语音 WebSocket) - 需要中间件已运行"
     echo "  nginx        仅部署 Nginx"
     echo "  middleware   仅部署中间件 (MySQL + Redis)"
-    echo "  voice_ws     仅部署语音 WebSocket 服务 - 需要后端已运行"
     echo ""
     echo -e "${YELLOW}示例:${NC}"
     echo "  $0                    # 启动所有服务（含中间件）"
@@ -136,7 +135,7 @@ show_help() {
     echo ""
     echo -e "${YELLOW}部署策略:${NC}"
     echo "  - 中间件(middleware): MySQL + Redis，通常不需要频繁重启"
-    echo "  - 代码服务: backend, frontend, fastapi, voice_ws，开发时频繁更新"
+    echo "  - 代码服务: backend, frontend, fastapi，开发时频繁更新"
     echo "  - 建议先启动 middleware，再按需启动代码服务"
 }
 
@@ -181,8 +180,8 @@ deploy_backend() {
 deploy_kdx_ws() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
-    # FastAPI端口不对外映射，检查容器状态
-    wait_for_container "kdx_ws"
+    # FastAPI 端口不对外映射，检查容器状态
+    wait_for_container "kdx-ws-be"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
 
@@ -231,8 +230,8 @@ deploy_all() {
     echo -e "\n${BLUE}【步骤2/4】启动后端服务${NC}"
     deploy_backend
 
-    # 步骤3: 部署其他代码服务
-    echo -e "\n${BLUE}【步骤3/4】启动 FastAPI 和 WebSocket${NC}"
+    # 步骤 3: 部署其他代码服务
+    echo -e "\n${BLUE}【步骤 3/4】启动 FastAPI 服务${NC}"
     deploy_kdx_ws
 
 
@@ -296,7 +295,7 @@ main() {
                 action="clean"
                 shift
                 ;;
-            all|backend|frontend|fastapi|nginx|middleware|voice_ws)
+            all|backend|frontend|fastapi|nginx|middleware)
                 modules=("$1")
                 shift
                 ;;
@@ -334,7 +333,6 @@ main() {
                 middleware)
                     deploy_middleware
                     ;;
-          
             esac
             ;;
 
@@ -357,16 +355,13 @@ main() {
                     ${DOCKER_COMPOSE} restart nginx
                     ;;
                 fastapi)
-                    ${DOCKER_COMPOSE} restart fastapi
+                    ${DOCKER_COMPOSE} restart kdx_ws
                     ;;
                 nginx)
                     ${DOCKER_COMPOSE} restart nginx
                     ;;
                 middleware)
                     ${DOCKER_COMPOSE} restart redis db
-                    ;;
-                voice_ws)
-                    ${DOCKER_COMPOSE} restart voice_ws
                     ;;
             esac
             echo -e "${GREEN}服务已重启！${NC}"
@@ -386,16 +381,13 @@ main() {
                     ${DOCKER_COMPOSE} build nginx
                     ;;
                 fastapi)
-                    ${DOCKER_COMPOSE} build fastapi
+                    ${DOCKER_COMPOSE} build kdx_ws
                     ;;
                 nginx)
                     ${DOCKER_COMPOSE} build nginx
                     ;;
                 middleware)
                     ${DOCKER_COMPOSE} build redis db
-                    ;;
-                voice_ws)
-                    ${DOCKER_COMPOSE} build voice_ws
                     ;;
             esac
             echo -e "${GREEN}镜像构建完成！${NC}"
@@ -423,7 +415,6 @@ main() {
                 middleware)
                     deploy_middleware
                     ;;
-              
             esac
             ;;
 
@@ -440,16 +431,13 @@ main() {
                     ${DOCKER_COMPOSE} logs -f nginx
                     ;;
                 fastapi)
-                    ${DOCKER_COMPOSE} logs -f fastapi
+                    ${DOCKER_COMPOSE} logs -f kdx_ws
                     ;;
                 nginx)
                     ${DOCKER_COMPOSE} logs -f nginx
                     ;;
                 middleware)
                     ${DOCKER_COMPOSE} logs -f redis db
-                    ;;
-                voice_ws)
-                    ${DOCKER_COMPOSE} logs -f voice_ws
                     ;;
             esac
             ;;

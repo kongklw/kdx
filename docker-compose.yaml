@@ -62,8 +62,8 @@ services:
 
   kdx_ws:
     build:
-      context: .
-      dockerfile: kdx-ws-be/Dockerfile
+      context: kdx-ws-be
+      dockerfile: Dockerfile
     env_file:
       - kdx-ws-be/.env
     expose:
