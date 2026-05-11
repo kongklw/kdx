@@ -1,4 +1,4 @@
-# 建立 python 3.9环境
+# 建立 python 3.12环境
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
 # 替换软件源为阿里云
@@ -24,21 +24,30 @@ ENV PYTHONUNBUFFERED 1
 COPY pip.conf /root/.pip/pip.conf
 
 # 容器内创建 myproject 文件夹
-ENV APP_HOME=/home/kdemo
+ENV APP_HOME=/home/kdx-be
 RUN mkdir -p $APP_HOME
 WORKDIR $APP_HOME
 
-# 将当前目录加入到工作目录中（. 表示当前目录）
-ADD . $APP_HOME
+# ============================================
+# 优化：先复制 requirements.txt，利用 Docker 缓存
+# 只要 requirements.txt 不变，pip install 会使用缓存
+# ============================================
 
-# 解压打包后的前端静态文件
-# RUN tar -xvf frontend/dist.tar --strip-components 1 -C frontend
-# RUN unzip -o frontend/dist.zip -d frontend/
-# 更新pip版本
+# 先复制 requirements.txt（变化频率低）
+COPY requirements.txt .
+
+# 更新 pip 版本
 RUN /usr/local/bin/python -m pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/
 
-# 安装项目依赖
+# 安装项目依赖（可缓存）
 RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+# ============================================
+# 最后复制代码（变化频率高）
+# ============================================
+
+# 将当前目录加入到工作目录中（. 表示当前目录）
+ADD . $APP_HOME
 
 RUN uwsgi --version
 
@@ -50,4 +59,3 @@ RUN chmod 777 ./start.sh
 
 # 数据迁移，并使用uwsgi启动服务
 ENTRYPOINT /bin/bash ./start.sh
-
