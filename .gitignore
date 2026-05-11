@@ -1,5 +1,238 @@
-# Byte-compiled / optimized / DLL files
+# =============================================================================
+# KDX Monorepo - 统一 Git 忽略规则
+# 涵盖技术栈: Python/Django/FastAPI + Node.js/Vue + Docker
+# =============================================================================
 
-kdemo
-kdemo-fe
-.idea
+# ============================================
+# 通用 IDE 和编辑器
+# ============================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ============================================
+# Python (Django/FastAPI 后端)
+# ============================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django 特定
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# Flask 特定
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Sphinx 文档
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# PDM
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# 环境变量文件
+.env
+.env.local
+.env.*.local
+.venv
+venv/
+ENV/
+env/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+Cython/Debugger/
+
+# ============================================
+# Node.js/Vue (前端)
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# 构建输出
+dist/
+dist-ssr/
+*.local
+
+# 测试
+tests/**/coverage/
+tests/e2e/reports/
+selenium-debug.log
+
+# 包管理器锁定文件（根据团队需求决定是否忽略）
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Vite
+*.timestamp-*
+
+# ============================================
+# Docker
+# ============================================
+.dockerignore
+Dockerfile.*
+!Dockerfile
+!Dockerfile.prod
+docker-compose.*.yml
+!docker-compose.yml
+!docker-compose.yaml
+.docker/
+
+# ============================================
+# 日志文件
+# ============================================
+logs/
+*.log
+
+# ============================================
+# 临时文件
+# ============================================
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# ============================================
+# 数据库备份
+# ============================================
+*.sql.gz
+*.dump
+*.backup.sql
+
+# ============================================
+# 项目特定（旧项目迁移遗留）
+# ============================================
+kdemo/
+kdemo-fe/
+
+# ============================================
+# 其他
+# ============================================
+*.pid
+*.seed
+*.pid.lock
+
+# 存档文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 大文件
+*.mp4
+*.mov
+*.avi
+*.mkv
