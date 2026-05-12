@@ -16,14 +16,14 @@ NC='\033[0m' # No Color
 
 # 项目路径
 PROJECT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DOCKER_COMPOSE="docker-compose"
 MAX_WAIT=300
 CHECK_INTERVAL=2
 
-# 检查 docker-compose 命令
-if ! command -v docker-compose &> /dev/null; then
-    if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-        DOCKER_COMPOSE="docker compose"
+# 优先使用 docker compose（新版），兼容旧版 docker-compose
+DOCKER_COMPOSE="docker compose"
+if ! docker compose version &> /dev/null; then
+    if command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE="docker-compose"
     else
         echo -e "${RED}错误: 未找到 docker-compose 或 docker compose${NC}"
         exit 1

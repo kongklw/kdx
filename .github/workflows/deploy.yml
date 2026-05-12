@@ -150,4 +150,4 @@ jobs:
             chmod +777 start.sh
             ./start.sh nginx
             echo "=== 服务状态 ==="
-            docker-compose ps
+            docker compose ps
