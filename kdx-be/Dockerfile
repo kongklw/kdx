@@ -51,9 +51,12 @@ ADD . $APP_HOME
 
 RUN uwsgi --version
 
+# 创建日志目录
+RUN mkdir -p /home/kdx-be/logs
+
 # 添加健康检查
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD curl -f http://localhost:8000/ || exit 1
 
-# 直接使用 uwsgi 启动服务
-CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
+# 使用 uwsgi 启动服务，并通过 tail 保持容器前台运行
+CMD ["sh", "-c", "uwsgi --ini /home/kdx-be/uwsgi.ini && tail -f /home/kdx-be/logs/uwsgi.log"]
