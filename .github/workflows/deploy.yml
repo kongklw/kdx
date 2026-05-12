@@ -95,6 +95,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
+          port: 22
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
           script: |
@@ -116,6 +117,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
+          port: 22
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
           script: |
@@ -137,6 +139,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
+          port: 22
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
           script: |
