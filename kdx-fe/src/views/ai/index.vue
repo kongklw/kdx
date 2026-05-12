@@ -144,9 +144,6 @@ export default {
     getDefaultWsUrl() {
       const token = getToken()
       const qs = token ? `?token=${encodeURIComponent(token)}` : ''
-      if (process.env.NODE_ENV === 'development') {
-        return `ws://127.0.0.1:8002/ws/voice_agent_langchain${qs}`
-      }
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
       return `${scheme}://${window.location.host}/prod-ai/ws/voice_agent_langchain${qs}`
     },

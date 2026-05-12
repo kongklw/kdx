@@ -64,7 +64,15 @@ module.exports = {
           "^/dev-api/gobackend": ""
         }
       },
-
+      '/prod-ai': {
+        target: process.env.VUE_APP_API_TARGET_FASTAPI || "http://localhost:8001",
+        secure: false,
+        changeOrigin: true,
+        ws: true,
+        pathRewrite: {
+          "^/prod-ai": ""
+        }
+      }
     }
   },
   configureWebpack: {
