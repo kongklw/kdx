@@ -24,7 +24,7 @@ from rest_framework_simplejwt.views import (
 )
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
-from student.urls import router
+# from student.urls import router
 
 urlpatterns = [
 
@@ -43,7 +43,7 @@ urlpatterns = [
                   path("user/", include("users.urls")),
                   path("sport/", include("sport.urls")),
                   path("k8s/", include("k8s.urls")),
-                  path("", include(router.urls)),
+                  # path("", include(router.urls)),
                   # path("baby/",include(babyRouter.urls)),
                   path("baby/", include("baby.urls")),
                   path("ai/", include("aistart.urls")),
