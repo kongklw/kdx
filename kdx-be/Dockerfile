@@ -51,11 +51,8 @@ ADD . $APP_HOME
 
 RUN uwsgi --version
 
-# 移除\r in windows
-RUN sed -i 's/\r//' ./start.sh
+# 创建日志目录
+RUN mkdir -p /home/kdx-be/logs
 
-# 给start.sh可执行权限
-RUN chmod 777 ./start.sh
-
-# 数据迁移，并使用uwsgi启动服务
-ENTRYPOINT /bin/bash ./start.sh
+# 直接使用 uwsgi 启动服务
+CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
