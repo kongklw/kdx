@@ -2,8 +2,8 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 
-# 获取当前文件夹名，即为该Django的项目名
-project_name = os.path.split(os.path.abspath('.'))[-1]
+# Django项目名（固定为kdemo）
+project_name = 'kdemo'
 project_settings = '%s.settings' % project_name
 
 # 设置环境变量
@@ -36,4 +36,3 @@ app.conf.beat_schedule = {
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
     print(f'Request: {self.request!r}')
-
