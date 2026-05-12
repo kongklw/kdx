@@ -84,7 +84,7 @@ jobs:
           key: ${{ env.SSH_KEY }}
           port: 22
           source: "kdx-fe/dist"
-          target: "${{ env.PROJECT_PATH }}/kdx-fe/"
+          target: "${{ env.PROJECT_PATH }}/kdx-fe/dist/"
 
   deploy-backend:
     needs: detect-changes
