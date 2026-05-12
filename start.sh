@@ -201,10 +201,11 @@ deploy_kdx_ws() {
 deploy_nginx() {
     echo -e "${YELLOW}=== 部署 Nginx ===${NC}"
     
-    # 确保前端已构建
+    # 前端已在 GitHub Action 中构建，这里直接启动 Nginx
+    # 如果 dist 目录不存在，可能是首次部署或本地测试，提示用户
     if [ ! -d "${PROJECT_PATH}/kdx-fe/dist" ]; then
-        echo -e "${BLUE}前端目录不存在，先构建前端...${NC}"
-        build_frontend
+        echo -e "${RED}警告: 前端 dist 目录不存在！${NC}"
+        echo -e "${YELLOW}请确保前端已通过 GitHub Action 构建，或手动执行: cd kdx-fe && npm install && npm run build:prod${NC}"
     fi
     
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx

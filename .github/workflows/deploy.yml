@@ -29,30 +29,24 @@ jobs:
 
           MODULES=""
 
-          # 检测后端变更
           if echo "$CHANGED_FILES" | grep -qE "^kdx-be/"; then
             MODULES="$MODULES backend,"
           fi
 
-          # 检测前端变更
           if echo "$CHANGED_FILES" | grep -qE "^kdx-fe/"; then
             MODULES="$MODULES frontend,"
           fi
 
-          # 检测 WebSocket 后端变更
           if echo "$CHANGED_FILES" | grep -qE "^kdx-ws-be/"; then
             MODULES="$MODULES fastapi,"
           fi
 
-          # 检测配置变更（影响所有服务）
           if echo "$CHANGED_FILES" | grep -qE "^compose/|^docker-compose\.yaml"; then
             MODULES="$MODULES nginx,"
           fi
 
-          # 移除末尾逗号
           MODULES=$(echo "$MODULES" | sed 's/,$//')
 
-          # 如果没有检测到具体模块变更，默认部署所有
           if [ -z "$MODULES" ]; then
             MODULES="backend,frontend,fastapi,nginx"
           fi
@@ -60,13 +54,44 @@ jobs:
           echo "Changed modules: $MODULES"
           echo "changed_modules=$MODULES" >> $GITHUB_OUTPUT
 
-  deploy:
+  build-frontend:
     needs: detect-changes
+    if: contains(needs.detect-changes.outputs.changed_modules, 'frontend')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to server
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: kdx-fe
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: kdx-fe
+        run: npm run build:prod
+
+      - name: Upload dist to ECS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ env.SSH_KEY }}
+          port: 22
+          source: "kdx-fe/dist"
+          target: "${{ env.PROJECT_PATH }}/kdx-fe/"
+
+  deploy-backend:
+    needs: detect-changes
+    if: contains(needs.detect-changes.outputs.changed_modules, 'backend')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy backend
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
@@ -75,40 +100,51 @@ jobs:
           script: |
             set -e
             cd ${{ env.PROJECT_PATH }}
-
-            echo "=== 拉取最新代码 ==="
             git pull origin main
-
-            # 修复 BOM 头问题
             sed -i '1s/^\xEF\xBB\xBF//' start.sh
             chmod +x start.sh
+            ./start.sh backend
 
-            MODULES="${{ needs.detect-changes.outputs.changed_modules }}"
-            echo "需要部署的模块: $MODULES"
+  deploy-fastapi:
+    needs: detect-changes
+    if: contains(needs.detect-changes.outputs.changed_modules, 'fastapi')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-            # 部署后端
-            if echo "$MODULES" | grep -q "backend"; then
-              echo "=== 部署后端 (kdx-be) ==="
-              ./start.sh backend
-            fi
+      - name: Deploy FastAPI
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ env.PROJECT_PATH }}
+            git pull origin main
+            sed -i '1s/^\xEF\xBB\xBF//' start.sh
+            chmod +x start.sh
+            ./start.sh fastapi
 
-            # 部署前端
-            if echo "$MODULES" | grep -q "frontend"; then
-              echo "=== 部署前端 (kdx-fe) ==="
-              ./start.sh frontend
-            fi
+  deploy-nginx:
+    needs: [detect-changes, build-frontend]
+    if: contains(needs.detect-changes.outputs.changed_modules, 'frontend') || contains(needs.detect-changes.outputs.changed_modules, 'nginx')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-            # 部署 FastAPI
-            if echo "$MODULES" | grep -q "fastapi"; then
-              echo "=== 部署 WebSocket 后端 (kdx-ws-be) ==="
-              ./start.sh fastapi
-            fi
-
-            # 部署 Nginx
-            if echo "$MODULES" | grep -q "nginx"; then
-              echo "=== 部署 Nginx ==="
-              ./start.sh nginx
-            fi
-
-            echo "=== 部署完成，服务状态 ==="
+      - name: Deploy Nginx
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ env.PROJECT_PATH }}
+            git pull origin main
+            sed -i '1s/^\xEF\xBB\xBF//' start.sh
+            chmod +x start.sh
+            ./start.sh nginx
+            echo "=== 服务状态 ==="
             docker-compose ps
