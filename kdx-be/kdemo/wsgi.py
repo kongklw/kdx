@@ -10,7 +10,7 @@ https://docs.djangoproject.com/en/3.2/howto/deployment/wsgi/
 import os
 
 from django.core.wsgi import get_wsgi_application
-
+print('hhaha')
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'kdemo.settings')
 
 application = get_wsgi_application()
