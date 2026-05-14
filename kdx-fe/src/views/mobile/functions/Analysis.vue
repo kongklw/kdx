@@ -363,7 +363,12 @@ export default {
         if (lineRes && lineRes.code === 200 && lineRes.data) this.lineChartTotal = lineRes.data
         if (sleepRes && sleepRes.code === 200 && sleepRes.data && sleepRes.data.results) this.sleepList = sleepRes.data.results
         if (growthRes && growthRes.code === 200 && growthRes.data && Array.isArray(growthRes.data.list)) this.growthLatest = growthRes.data.list[0] || null
-        if (vaccineRes && vaccineRes.code === 200 && vaccineRes.data) this.vaccineSchedule = vaccineRes.data
+        if (vaccineRes && vaccineRes.code === 200 && vaccineRes.data) {
+          this.vaccineSchedule = vaccineRes.data
+        } else if (vaccineRes && vaccineRes.code === 400) {
+          // 业务提示：请先完善宝宝信息，不显示错误
+          this.vaccineSchedule = null
+        }
       } catch (e) {
         Toast.fail('加载失败')
       } finally {

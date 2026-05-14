@@ -4,7 +4,8 @@ import store from '@/store'
 import { getToken } from '@/utils/auth'
 
 console.log('VUE_APP_BASE_API-different-environment-api------', process.env.VUE_APP_BASE_API)
-const baseURL = process.env.VUE_APP_BASE_API
+const baseURL = process.env.VUE_APP_BASE_API || '/dev-api'
+console.log('Effective baseURL:', baseURL)
 // create an axios instance
 const service = axios.create({
   baseURL: baseURL, // url = base url + request url
@@ -54,11 +55,14 @@ service.interceptors.response.use(
 
     // if the custom code is not 20000, it is judged as an error.
     if (res.code !== 200) {
-      Message({
-        message: res.message || 'Error',
-        type: 'error',
-        duration: 5 * 1000
-      })
+      // 400状态码为业务验证错误，不显示错误提示，由前端组件自行处理
+      if (res.code !== 400) {
+        Message({
+          message: res.message || 'Error',
+          type: 'error',
+          duration: 5 * 1000
+        })
+      }
 
       // 50008: Illegal token; 50012: Other clients logged in; 50014: Token expired;
       if (res.code === 50008 || res.code === 50012 || res.code === 50014) {
@@ -72,6 +76,10 @@ service.interceptors.response.use(
             location.reload()
           })
         })
+      }
+      // 400状态码返回res而不是reject，让前端组件处理业务逻辑
+      if (res.code === 400) {
+        return res
       }
       return Promise.reject(new Error(res.message || 'Error'))
     } else {

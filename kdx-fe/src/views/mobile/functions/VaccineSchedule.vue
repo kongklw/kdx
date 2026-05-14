@@ -263,6 +263,16 @@ export default {
           this.groups = data.groups || []
           this.paidCandidates = data.paid_candidates || []
           this.refreshDetailItem()
+        } else if (res.code === 400) {
+          // 业务提示：请先完善宝宝信息，显示友好提示而非错误
+          Toast({
+            message: res.msg || '请先完善宝宝信息',
+            type: 'none',
+            duration: 3000
+          })
+          this.baby = {}
+          this.groups = []
+          this.paidCandidates = []
         } else {
           Toast.fail(res.msg || '加载失败')
         }
