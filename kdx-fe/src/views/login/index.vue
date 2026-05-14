@@ -87,23 +87,6 @@
         </el-button>
       </el-form>
 
-      <!-- 分割线 -->
-      <div class="divider">
-        <span class="divider-text">或</span>
-      </div>
-
-      <!-- 第三方登录 -->
-      <div class="social-login">
-        <button class="social-btn wechat-btn">
-          <i class="icon-wechat" />
-          <span>微信登录</span>
-        </button>
-        <button class="social-btn qq-btn">
-          <i class="icon-qq" />
-          <span>QQ登录</span>
-        </button>
-      </div>
-
       <!-- 注册链接 -->
       <div class="register-link">
         <span>还没有账户?</span>
@@ -410,67 +393,6 @@ $input-bg: #f7fafc;
 
         &:active:not(:disabled) {
           transform: translateY(0);
-        }
-      }
-    }
-
-    .divider {
-      display: flex;
-      align-items: center;
-      margin: 25px 0;
-
-      &::before,
-      &::after {
-        content: '';
-        flex: 1;
-        height: 1px;
-        background: $border-color;
-      }
-
-      .divider-text {
-        padding: 0 15px;
-        font-size: 13px;
-        color: $text-secondary;
-      }
-    }
-
-    .social-login {
-      display: flex;
-      gap: 15px;
-
-      .social-btn {
-        flex: 1;
-        height: 45px;
-        border-radius: 10px;
-        border: 1px solid $border-color;
-        background: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        font-size: 14px;
-        color: $text-primary;
-        cursor: pointer;
-        transition: all 0.3s ease;
-
-        &:hover {
-          border-color: $primary-color;
-          color: $primary-color;
-          transform: translateY(-2px);
-        }
-
-        &.wechat-btn:hover {
-          border-color: #07c160;
-          color: #07c160;
-        }
-
-        &.qq-btn:hover {
-          border-color: #12b7f5;
-          color: #12b7f5;
-        }
-
-        i {
-          font-size: 18px;
         }
       }
     }
