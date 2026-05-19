@@ -101,7 +101,6 @@ export default {
 
   methods: {
     handleChange(val) {
-      console.log(val)
     },
     tableRowClassName({ row, rowIndex }) {
       if (rowIndex === 1) {

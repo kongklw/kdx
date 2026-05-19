@@ -95,7 +95,6 @@ export default {
   },
   watch: {
     basicInfo(newVal) {
-      console.log('hahaha basicinfo ', newVal)
       this.basicInfoText = newVal
     }
   },
@@ -108,7 +107,6 @@ export default {
 </script>
 
 <style lang="scss" scoped>
-
 
 .panel-group {
   margin-top: 12px;

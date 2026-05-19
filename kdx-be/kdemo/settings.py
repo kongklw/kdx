@@ -72,7 +72,8 @@ INSTALLED_APPS = [
     'fileUpload',
     'django_celery_results',
     'storages',
-    'rag'
+    'rag',
+    'face',
 ]
 
 

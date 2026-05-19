@@ -3,9 +3,7 @@ import { MessageBox, Message } from 'element-ui'
 import store from '@/store'
 import { getToken } from '@/utils/auth'
 
-console.log('VUE_APP_BASE_API-different-environment-api------', process.env.VUE_APP_BASE_API)
 const baseURL = process.env.VUE_APP_BASE_API || '/dev-api'
-console.log('Effective baseURL:', baseURL)
 // create an axios instance
 const service = axios.create({
   baseURL: baseURL, // url = base url + request url
@@ -32,7 +30,6 @@ service.interceptors.request.use(
   },
   error => {
     // do something with request error
-    console.log(error) // for debug
     return Promise.reject(error)
   }
 )
@@ -51,7 +48,6 @@ service.interceptors.response.use(
    */
   response => {
     const res = response.data
-    console.log('res-------', res)
 
     // if the custom code is not 20000, it is judged as an error.
     if (res.code !== 200) {
@@ -87,7 +83,6 @@ service.interceptors.response.use(
     }
   },
   error => {
-    console.log('err' + error) // for debug
     Message({
       message: error.message,
       type: 'error',

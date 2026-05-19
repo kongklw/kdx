@@ -250,7 +250,6 @@ export default {
 
     showSleepList() {
       const data = { ...this.pageInfo, ...this.formInline }
-      console.log('--------data----', data)
       showSleepListReq(data).then(res => {
         if (res.code === 200) {
           this.tableData = res.data
@@ -263,19 +262,14 @@ export default {
         if (valid) {
           this.showSleepList()
         } else {
-          console.log('error submit!!')
           return false
         }
       })
-      console.log('submit!')
-      console.log(this.formInline)
     },
 
     addSleepEvent() {
       const data = this.sleepForm
-      console.log('sleepForm data ', data)
       addSleepReq(data).then((res) => {
-        console.log('res')
         if (res.code === 200) {
           this.tableData = res.data
           this.showSleepList()
@@ -284,7 +278,6 @@ export default {
     },
 
     handleCurrentChange(val) {
-      console.log(`当前页: ${val}`)
     },
 
     clearFilter() {

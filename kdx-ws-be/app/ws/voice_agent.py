@@ -1,14 +1,12 @@
 import json
-import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, WebSocket
 from fastapi.websockets import WebSocketDisconnect
+from loguru import logger
 
 from ..core.config import Settings
 from ..core.security import extract_token_from_headers, verify_jwt
-
-logger = logging.getLogger(__name__)
 
 
 def _as_json(text: str) -> Optional[Dict[str, Any]]:

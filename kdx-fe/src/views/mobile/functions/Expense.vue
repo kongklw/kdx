@@ -424,7 +424,6 @@ export default {
           this.finished = true
         }
       } catch (error) {
-        console.error('Error fetching expense list:', error)
         this.finished = true
       } finally {
         this.loading = false

@@ -396,7 +396,6 @@ export default {
           this.newMessage = ''
           if (res.code === 200) {
             const data = res.data
-            console.log('请求ai 返回的数据为', data)
             this.messages.push({ author: 'AI', text: data.msg })
             this.thread_id = data.thread_id
           }

@@ -3,13 +3,7 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from utils import alibaba_client, client
-from django.core.cache import cache
-from django_redis import get_redis_connection
 from utils.chatApp import obtain_app
-
-con = get_redis_connection("default")  # Use the name you have defined for Redis in settings.CACHES
-connection_pool = con.connection_pool
-print("Created connections so far: %d" % connection_pool._created_connections)
 
 
 def openai_llm(content):

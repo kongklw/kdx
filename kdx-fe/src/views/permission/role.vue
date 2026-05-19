@@ -182,7 +182,7 @@ export default {
             message: 'Delete succed!'
           })
         })
-        .catch(err => { console.error(err) })
+        .catch(err => { })
     },
     generateTree(routes, basePath = '/', checkedKeys) {
       const res = []

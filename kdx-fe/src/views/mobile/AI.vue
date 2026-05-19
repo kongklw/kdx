@@ -8,6 +8,7 @@
       <van-grid-item icon="music-o" text="Voice Assistant" @click="openVoiceAssistant" />
       <van-grid-item icon="star-o" text="Voice Assistant (LC)" @click="openVoiceAssistantLangchain" />
       <van-grid-item icon="video-o" text="Video Creator" />
+      <van-grid-item icon="user-o" text="Face Recognition" @click="openFaceRecognition" />
     </van-grid>
 
     <van-empty description="更多 AI 功能即将上线" />
@@ -188,6 +189,100 @@
         <van-button size="small" @click="clearLogsLangchain">清空日志</van-button>
       </div>
     </van-popup>
+
+    <!-- 人脸识别弹窗 -->
+    <van-popup
+      v-model="showFaceRecognition"
+      position="bottom"
+      round
+      closeable
+      :style="{ height: '85vh' }"
+      class="face-popup"
+      @close="handleCloseFaceRecognition"
+    >
+      <div class="face-container">
+        <!-- 头部 -->
+        <div class="face-header">
+          <div class="face-title">人脸识别</div>
+        </div>
+
+        <!-- 主内容区 -->
+        <div class="face-body">
+          <!-- 未上传人脸时显示上传区域 -->
+          <div v-if="!hasFace" class="upload-section">
+            <div class="upload-icon">
+              <van-icon name="user-o" size="64" />
+            </div>
+            <div class="upload-text">请先上传您的人脸照片</div>
+            <div class="upload-hint">上传后即可使用人脸识别功能</div>
+            <van-button
+              type="primary"
+              size="large"
+              class="upload-btn"
+              @click="selectImage"
+            >
+              选择照片
+            </van-button>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              class="file-input"
+              @change="handleImageSelect"
+            >
+          </div>
+
+          <!-- 已上传人脸时显示识别区域 -->
+          <div v-else class="recognize-section">
+            <!-- 识别进行中显示摄像头画面 -->
+            <div v-if="isRecognizing" class="camera-section">
+              <div class="camera-label">正在识别中...</div>
+              <div class="camera-container">
+                <video ref="videoRef" class="camera-video" autoplay playsinline />
+                <div class="face-frame" />
+              </div>
+            </div>
+
+            <!-- 未识别时显示已上传人脸预览 -->
+            <div v-else class="face-preview">
+              <div class="preview-label">已上传的人脸</div>
+              <div class="preview-placeholder">
+                <van-icon name="user-o" size="80" />
+              </div>
+            </div>
+
+            <!-- 重新上传按钮 -->
+            <van-button
+              size="small"
+              class="reupload-btn"
+              @click="selectImage"
+            >
+              重新上传照片
+            </van-button>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              class="file-input"
+              @change="handleImageSelect"
+            >
+          </div>
+
+          <!-- 识别结果展示 -->
+          <div v-if="recognitionResult" class="result-section">
+            <div :class="['result-icon', recognitionResult.matched ? 'success' : 'fail']">
+              <van-icon :name="recognitionResult.matched ? 'success' : 'cross'" size="48" />
+            </div>
+            <div :class="['result-text', recognitionResult.matched ? 'success' : 'fail']">
+              {{ recognitionResult.matched ? '人脸识别成功' : '人脸识别失败' }}
+            </div>
+            <div v-if="recognitionResult.confidence" class="result-confidence">
+              相似度: {{ (recognitionResult.confidence * 100).toFixed(2) }}%
+            </div>
+          </div>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -246,7 +341,14 @@ export default {
       sttFinalLangchain: '',
       agentTextLangchain: '',
       ttsAudioCtxLangchain: null,
-      ttsNextPlayTimeLangchain: 0
+      ttsNextPlayTimeLangchain: 0,
+
+      // 人脸识别相关
+      showFaceRecognition: false,
+      hasFace: false,
+      faceStatus: 'idle', // idle, uploading, uploaded, recognizing, matched, failed
+      isRecognizing: false,
+      recognitionResult: null
     }
   },
   computed: {
@@ -265,6 +367,7 @@ export default {
     wsStatusTextLangchain() {
       return this.wsStatusLangchain
     }
+    // 人脸识别状态
   },
   watch: {
     showVoiceAssistant(val) {
@@ -896,23 +999,23 @@ export default {
     async stopRecordingLangchain() {
       this.isRecordingLangchain = false
       if (this.processorNodeLangchain) {
-        try { this.processorNodeLangchain.disconnect() } catch (e) {}
+        try { this.processorNodeLangchain.disconnect() } catch (e) { /* ignore disconnect errors */ }
         this.processorNodeLangchain = null
       }
       if (this.sourceNodeLangchain) {
-        try { this.sourceNodeLangchain.disconnect() } catch (e) {}
+        try { this.sourceNodeLangchain.disconnect() } catch (e) { /* ignore disconnect errors */ }
         this.sourceNodeLangchain = null
       }
       if (this.sinkNodeLangchain) {
-        try { this.sinkNodeLangchain.disconnect() } catch (e) {}
+        try { this.sinkNodeLangchain.disconnect() } catch (e) { /* ignore disconnect errors */ }
         this.sinkNodeLangchain = null
       }
       if (this.audioContextLangchain) {
-        try { await this.audioContextLangchain.close() } catch (e) {}
+        try { await this.audioContextLangchain.close() } catch (e) { /* ignore close errors */ }
         this.audioContextLangchain = null
       }
       if (this.micStreamLangchain) {
-        try { this.micStreamLangchain.getTracks().forEach((t) => t.stop()) } catch (e) {}
+        try { this.micStreamLangchain.getTracks().forEach((t) => t.stop()) } catch (e) { /* ignore stop errors */ }
         this.micStreamLangchain = null
       }
     },
@@ -991,6 +1094,297 @@ export default {
       const startAt = Math.max(now, this.ttsNextPlayTimeLangchain)
       source.start(startAt)
       this.ttsNextPlayTimeLangchain = startAt + buffer.duration
+    },
+    // 人脸识别相关方法
+    openFaceRecognition() {
+      this.showFaceRecognition = true
+      this.recognitionResult = null
+      this.checkFaceInfo()
+    },
+    handleCloseFaceRecognition() {
+      this.showFaceRecognition = false
+      this.recognitionResult = null
+    },
+    async checkFaceInfo() {
+      try {
+        // axios拦截器已经处理过响应，response直接是后端返回的{code, data, msg}
+        const response = await this.$axios.get('/face/info')
+        if (response.code === 200 && response.data.has_face) {
+          this.$set(this, 'hasFace', true)
+          this.$set(this, 'faceStatus', 'uploaded')
+          // 已上传人脸，自动开始识别
+          setTimeout(() => {
+            this.startRecognition()
+          }, 500)
+        } else {
+          this.$set(this, 'hasFace', false)
+          this.$set(this, 'faceStatus', 'idle')
+        }
+      } catch (error) {
+        this.$set(this, 'hasFace', false)
+        this.$set(this, 'faceStatus', 'idle')
+      }
+    },
+    async selectImage() {
+      // 触发文件选择
+      const fileInput = this.$refs.fileInput || this.$refs.reuploadInput
+      if (fileInput) {
+        fileInput.click()
+      }
+    },
+    async uploadToMinIO(file) {
+      // 步骤1：获取预签名上传URL
+      let initResponse
+      try {
+        initResponse = await this.$axios.post('/file/presign/init', {
+          purpose: 'face',
+          filename: file.name,
+          content_type: file.type,
+          size: file.size
+        })
+      } catch (error) {
+        // 请求失败或响应拦截器抛出异常
+        const msg = (error.response && error.response.data && error.response.data.msg) || '获取上传地址失败'
+        throw new Error(msg)
+      }
+
+      // 响应拦截器已处理，直接检查code
+      if (!initResponse || initResponse.code !== 200) {
+        const msg = (initResponse && initResponse.msg) || '获取上传地址失败'
+        // 如果 S3 未启用，降级到表单上传
+        if (initResponse && initResponse.code === 400 && msg === 'S3 media not enabled') {
+          return await this.uploadByForm(file)
+        }
+        throw new Error(msg)
+      }
+
+      const { asset_id: assetId, upload_url: uploadUrl, headers } = initResponse.data
+
+      // 步骤2：上传文件到 MiniIO（直接 PUT 请求到预签名 URL）
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          ...(headers || {}),
+          'Content-Type': file.type
+        }
+      })
+
+      if (!uploadResponse.ok) {
+        throw new Error(`上传文件失败: ${uploadResponse.status}`)
+      }
+
+      // 步骤3：确认上传完成
+      let completeResponse
+      try {
+        completeResponse = await this.$axios.post('/file/presign/complete', {
+          asset_id: assetId
+        })
+      } catch (error) {
+        const msg = (error.response && error.response.data && error.response.data.msg) || '确认上传失败'
+        throw new Error(msg)
+      }
+
+      if (!completeResponse || completeResponse.code !== 200) {
+        throw new Error((completeResponse && completeResponse.msg) || '确认上传失败')
+      }
+
+      // 步骤4：获取文件访问URL
+      let urlResponse
+      try {
+        urlResponse = await this.$axios.get('/file/presign/url', {
+          params: { asset_id: assetId }
+        })
+      } catch (error) {
+        const msg = (error.response && error.response.data && error.response.data.msg) || '获取文件URL失败'
+        throw new Error(msg)
+      }
+
+      if (!urlResponse || urlResponse.code !== 200) {
+        throw new Error((urlResponse && urlResponse.msg) || '获取文件URL失败')
+      }
+
+      return urlResponse.data.url
+    },
+    async uploadByForm(file) {
+      // 降级方案：直接通过表单上传到后端
+      const formData = new FormData()
+      formData.append('file', file)
+
+      let response
+      try {
+        response = await this.$axios.post('/file/upload', formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data'
+          }
+        })
+      } catch (error) {
+        const msg = (error.response && error.response.data && error.response.data.msg) || '上传失败'
+        throw new Error(msg)
+      }
+
+      if (!response || response.code !== 200) {
+        throw new Error((response && response.msg) || '上传失败')
+      }
+
+      // 将相对路径转换为完整的绝对URL
+      let fileUrl = response.data.url
+      if (fileUrl.startsWith('/')) {
+        // 拼接后端基础URL
+        const baseUrl = process.env.VUE_APP_API_TARGET_DEFAULT || 'http://localhost:8086'
+        fileUrl = baseUrl + fileUrl
+      }
+
+      return fileUrl
+    },
+    async handleImageSelect(event) {
+      const file = event.target.files[0]
+      if (!file) return
+
+      // 验证文件类型
+      if (!file.type.startsWith('image/')) {
+        Toast.fail('请选择图片文件')
+        return
+      }
+
+      // 验证文件大小（最大 5MB）
+      if (file.size > 5 * 1024 * 1024) {
+        Toast.fail('图片大小不能超过 5MB')
+        return
+      }
+
+      this.faceStatus = 'uploading'
+
+      try {
+        // 使用 MiniIO 上传流程
+        const faceUrl = await this.uploadToMinIO(file)
+
+        // 调用 Django 人脸识别 API 上传人脸
+        const response = await this.$axios.post('/face/upload', {
+          face_url: faceUrl
+        })
+
+        // axios拦截器已经处理过响应，response直接是后端返回的{code, data, msg}
+        if (response.code === 200) {
+          Toast.success('人脸照片上传成功')
+          // 使用 Vue.set 确保响应式更新
+          this.$set(this, 'hasFace', true)
+          this.$set(this, 'faceStatus', 'uploaded')
+          this.$set(this, 'recognitionResult', null)
+          // 强制重新渲染确保界面正确更新
+          this.$forceUpdate()
+          // 重新检查人脸状态确保一致性
+          setTimeout(() => {
+            this.checkFaceInfo()
+          }, 300)
+        } else {
+          Toast.fail(response.msg || '上传失败')
+          this.faceStatus = 'idle'
+        }
+      } catch (error) {
+        Toast.fail('上传失败，请重试')
+        this.faceStatus = 'idle'
+      }
+
+      // 重置文件输入
+      const target = event.target
+      Promise.resolve().then(() => {
+        target.value = ''
+      })
+    },
+    async startRecognition() {
+      // 使用摄像头拍照进行识别
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        Toast.fail('当前浏览器不支持摄像头')
+        return
+      }
+
+      let stream = null
+      try {
+        this.isRecognizing = true
+        this.faceStatus = 'recognizing'
+        this.recognitionResult = null
+
+        // 请求摄像头权限
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }})
+
+        // 获取视频元素并显示摄像头画面
+        const video = this.$refs.videoRef
+        if (video) {
+          video.srcObject = stream
+          await video.play()
+        }
+
+        // 等待摄像头就绪并拍照
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        // 拍照
+        const canvas = document.createElement('canvas')
+        const videoElement = video || document.createElement('video')
+        canvas.width = videoElement.videoWidth || 640
+        canvas.height = videoElement.videoHeight || 480
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+
+        // 停止摄像头
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop())
+        }
+
+        // 清除视频显示
+        if (video) {
+          video.srcObject = null
+        }
+
+        // 转换为 Blob
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'))
+
+        // 创建 File 对象
+        const file = new File([blob], 'face_capture.jpg', { type: 'image/jpeg' })
+
+        // 使用 MiniIO 上传流程
+        const faceUrl = await this.uploadToMinIO(file)
+
+        // 调用 Django 人脸识别 API 进行比对
+        const response = await this.$axios.post('/face/match', {
+          face_url: faceUrl
+        })
+
+        // axios拦截器已经处理过响应，response直接是后端返回的{code, data, msg}
+        if (response.code === 200) {
+          this.recognitionResult = response.data
+          this.faceStatus = response.data.matched ? 'matched' : 'failed'
+
+          if (response.data.matched) {
+            Toast.success('人脸识别成功！')
+          } else {
+            Toast.fail(response.data.message || '人脸识别失败')
+          }
+        } else {
+          Toast.fail(response.msg || '识别失败')
+          this.faceStatus = 'failed'
+        }
+      } catch (error) {
+        // 停止摄像头
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop())
+        }
+        // 清除视频显示
+        const video = this.$refs.videoRef
+        if (video) {
+          video.srcObject = null
+        }
+
+        Toast.fail('识别失败，请重试')
+        this.faceStatus = 'uploaded'
+        this.recognitionResult = {
+          matched: false,
+          confidence: 0,
+          message: '识别失败: ' + (error.message || '未知错误')
+        }
+      } finally {
+        this.isRecognizing = false
+      }
     }
   }
 }
@@ -1142,5 +1536,219 @@ export default {
   gap: 8px;
   flex-wrap: wrap;
   padding: 8px 2px 10px;
+}
+
+/* 人脸识别弹窗样式 */
+.face-popup {
+  display: flex;
+  flex-direction: column;
+}
+
+.face-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.face-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 12px 12px;
+}
+
+.face-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.face-body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.upload-icon {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+}
+
+.upload-text {
+  font-size: 18px;
+  font-weight: 500;
+  color: #111827;
+}
+
+.upload-hint {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.upload-btn {
+  width: 100%;
+  max-width: 200px;
+  height: 44px;
+}
+
+.file-input {
+  display: none;
+}
+
+.recognize-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+}
+
+.face-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.preview-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.preview-placeholder {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: #f3f4f6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+}
+
+.recognize-hint {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.reupload-btn {
+  color: #6b7280;
+}
+
+/* 摄像头相关样式 */
+.camera-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.camera-label {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.camera-container {
+  position: relative;
+  width: 100%;
+  max-width: 300px;
+  aspect-ratio: 4/3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.face-frame {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 120px;
+  height: 120px;
+  border: 3px solid #10b981;
+  border-radius: 50%;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+  pointer-events: none;
+}
+
+.result-section {
+  position: fixed;
+  top: 55%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 20px;
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  z-index: 1000;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  min-width: 260px;
+}
+
+.result-icon {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.result-icon.success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+}
+
+.result-icon.fail {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #fff;
+}
+
+.result-text {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.result-text.success {
+  color: #059669;
+}
+
+.result-text.fail {
+  color: #dc2626;
+}
+
+.result-confidence {
+  font-size: 14px;
+  color: #6b7280;
 }
 </style>

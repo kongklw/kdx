@@ -75,8 +75,7 @@ export default {
           _self._data.dataObj.key = key
           this.tempUrl = response.data.qiniu_url
           resolve(true)
-        }).catch(err => {
-          console.log(err)
+        }).catch(() => {
           reject(false)
         })
       })

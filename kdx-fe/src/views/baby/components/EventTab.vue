@@ -329,7 +329,7 @@ export default {
       babyPantsList: [],
 
       list: [{ 'order_no': 1, 'price': 100 }, { 'order_no': 2, 'price': 200 }],
-       
+
       temperature_query: { 'date': '', 'mode': 'today' },
       date: '',
       date_time: ''
@@ -342,9 +342,7 @@ export default {
   methods: {
     deleteFeedLog(row) {
       this.loading = true
-      console.log('delete feed log  row is ', row)
       deleteFeedReq(row).then(res => {
-        console.log(res)
         if (res.code === 200) {
           this.fetchData()
         }

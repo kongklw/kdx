@@ -2,14 +2,12 @@ import asyncio
 import contextlib
 import os
 import json
-import logging
 from typing import Optional, AsyncIterator
 from urllib.parse import urlencode
 import websockets
 from websockets.legacy.client import WebSocketClientProtocol
+from loguru import logger
 from .event import STTChunkEvent, STTEvent, STTOutputEvent
-
-logger = logging.getLogger(__name__)
 
 
 class AssemblyAISTT:

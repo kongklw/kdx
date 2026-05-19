@@ -418,7 +418,6 @@ export default {
           this.babyDetails = res.data[0]
         }
       } catch (e) {
-        console.error(e)
       }
     },
     onClickLeft() {
@@ -516,7 +515,6 @@ export default {
           this.finished = true
         }
       } catch (error) {
-        console.error(error)
         this.finished = true
       } finally {
         this.loading = false
@@ -707,7 +705,6 @@ export default {
           Toast.fail(res.msg || '操作失败')
         }
       } catch (err) {
-        console.error(err)
         Toast.fail('网络错误')
       }
     },
@@ -726,7 +723,6 @@ export default {
               Toast.fail(res.msg || '删除失败')
             }
           } catch (error) {
-            console.error(error)
             Toast.fail('删除失败')
           }
         })

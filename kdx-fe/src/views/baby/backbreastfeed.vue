@@ -81,7 +81,6 @@ export default {
 
   methods: {
     handleLinkClick(row) {
-      console.log('click the link and data is ', row)
       this.$router.push({
         name: 'Details',
         query: {
@@ -91,7 +90,6 @@ export default {
     },
 
     handleClick(row) {
-      console.log(row)
     }
   }
 

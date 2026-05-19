@@ -78,7 +78,6 @@ export default {
   methods: {
     showSportList() {
       sportList().then(res => {
-        console.log(res)
         if (res.code === 200) {
           this.tableData = res.data
         }

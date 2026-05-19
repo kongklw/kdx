@@ -40,7 +40,6 @@ export default {
     chartData: {
       deep: true,
       handler(val) {
-        console.log('chart 接受到的val 为----', val)
         this.setOptions(val)
       }
     }
@@ -60,7 +59,6 @@ export default {
   methods: {
     initChart() {
       this.chart = echarts.init(this.$el, 'macarons')
-      console.log('linechart 里面', this.chartData)
       this.setOptions(this.chartData)
     },
     setOptions({ xAxisData, expectedData, actualData } = {}) {

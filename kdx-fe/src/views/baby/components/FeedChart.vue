@@ -40,7 +40,6 @@ export default {
     chartData: {
       deep: true,
       handler(val) {
-        console.log('chart 接受到的val 为----', val)
         this.setOptions(val)
       }
     }
@@ -60,16 +59,14 @@ export default {
   methods: {
     initChart() {
       this.chart = echarts.init(this.$el, 'macarons')
-      console.log('linechart 里面', this.chartData)
       this.setOptions(this.chartData)
     },
-    setOptions({ xAxisData,lowData,highData, actualData,titleText,yMin } = {}) {
+    setOptions({ xAxisData, lowData, highData, actualData, titleText, yMin } = {}) {
       this.chart.setOption({
         title: {
-          text: titleText,
+          text: titleText
           // subtext: 'Fake Data'
         },
-       
 
         tooltip: {
           trigger: 'axis',
@@ -87,10 +84,10 @@ export default {
 
         xAxis: {
           type: 'category',
-          data:xAxisData,
+          data: xAxisData,
 
           // data: xAxisData,
-          boundaryGap: false,
+          boundaryGap: false
           // axisTick: {
           //   show: false
           // }
@@ -112,7 +109,7 @@ export default {
           axisPointer: {
             snap: true
           },
-          min:yMin,
+          min: yMin
           // axisTick: {
           //   show: false
           // }
@@ -125,7 +122,7 @@ export default {
         series: [
           {
             name: 'low',
-           
+
             itemStyle: {
               normal: {
                 color: '#FF005A',
@@ -138,7 +135,7 @@ export default {
             smooth: true,
             type: 'line',
             data: lowData,
-       
+
             animationDuration: 2800,
             animationEasing: 'cubicInOut'
           },
@@ -152,11 +149,11 @@ export default {
                 }
               }
             },
-        
+
             smooth: true,
             type: 'line',
             data: highData,
-       
+
             animationDuration: 2800,
             animationEasing: 'cubicInOut'
           },
@@ -164,7 +161,7 @@ export default {
             name: 'actual',
             smooth: true,
             type: 'line',
-            symbolSize:10,
+            symbolSize: 10,
             itemStyle: {
               normal: {
                 color: '#3888fa',
@@ -178,7 +175,7 @@ export default {
               }
             },
             data: actualData,
-       
+
             animationDuration: 2800,
             animationEasing: 'quadraticOut'
           }]

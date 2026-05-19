@@ -20,6 +20,10 @@ MAINTAINER kdemo
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
+# 禁用 ONNX Runtime CPU 优化（兼容更多 CPU 型号）
+ENV ORT_DISABLE_CPU_OPTIMIZATION 1
+ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
+
 # 可选：设置镜像源为国内
 COPY pip.conf /root/.pip/pip.conf
 
@@ -41,6 +45,19 @@ RUN /usr/local/bin/python -m pip install --upgrade pip -i https://mirrors.aliyun
 
 # 安装项目依赖（可缓存）
 RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+# ============================================
+# 预下载 InsightFace 模型（在构建阶段完成）
+# ============================================
+
+# 创建 InsightFace 模型目录并设置权限
+RUN mkdir -p /root/.insightface && chmod -R 755 /root/.insightface
+
+# 复制模型下载脚本
+COPY scripts/download_insightface_models.py /tmp/
+
+# 运行模型预下载脚本
+RUN python /tmp/download_insightface_models.py
 
 # ============================================
 # 最后复制代码（变化频率高）

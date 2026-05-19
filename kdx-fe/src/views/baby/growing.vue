@@ -3,7 +3,7 @@
 
     <div class="top-tab">
 
-      <el-tabs type="border-card" v-model="activeName" @tab-click="handleClick">
+      <el-tabs v-model="activeName" type="border-card" @tab-click="handleClick">
         <el-tab-pane label="成长记录" name="first">
 
           <el-collapse v-model="logActiveName" accordion>
@@ -25,20 +25,26 @@
               <el-row :gutter="5">
                 <el-col :xs="{ span: 12 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 4 }" :xl="{ span: 4 }">
                   <el-form-item label="文章标题" required prop="title">
-                    <el-input v-model="growingForm.title"></el-input>
+                    <el-input v-model="growingForm.title" />
                   </el-form-item>
                 </el-col>
 
                 <el-col :xs="{ span: 24 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 10 }" :xl="{ span: 12 }">
                   <el-form-item label="文章内容" required prop="content">
 
-                    <el-input type="textarea" autosize v-model="growingForm.content"></el-input>
+                    <el-input v-model="growingForm.content" type="textarea" autosize />
                   </el-form-item>
 
                 </el-col>
 
-                <el-col :xs="{ span: 24 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 4 }" :xl="{ span: 2 }"
-                  :offset="2">
+                <el-col
+                  :xs="{ span: 24 }"
+                  :sm="{ span: 12 }"
+                  :md="{ span: 12 }"
+                  :lg="{ span: 4 }"
+                  :xl="{ span: 2 }"
+                  :offset="2"
+                >
                   <el-form-item>
                     <el-button type="primary" @click="dialogVisible = true">AI帮写</el-button>
                     <el-button type="primary" @click="addEvent">添加记录</el-button>
@@ -61,7 +67,7 @@
 
               <el-col :xs="{ span: 24 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 10 }" :xl="{ span: 12 }">
                 <el-form-item required label="提示词">
-                  <el-input type="textarea" autosize v-model="growingAIForm.content"></el-input>
+                  <el-input v-model="growingAIForm.content" type="textarea" autosize />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -96,20 +102,19 @@ export default {
       fullscreenLoading: false,
       dialogVisible: false,
 
-
       commonWordList: [
-        { name: "喂水", creativeWordId: 1 },
-        { name: "喂奶", creativeWordId: 2 },
-        { name: "翻身", creativeWordId: 3 },
-        { name: "轻拍", creativeWordId: 4 },
-        { name: "奶嘴安抚", creativeWordId: 5 },
-        { name: "哼唧", creativeWordId: 6 },
-        { name: "侧漏", creativeWordId: 7 },
-        { name: "梦哭", creativeWordId: 8 },
-        { name: "梦笑", creativeWordId: 9 },
+        { name: '喂水', creativeWordId: 1 },
+        { name: '喂奶', creativeWordId: 2 },
+        { name: '翻身', creativeWordId: 3 },
+        { name: '轻拍', creativeWordId: 4 },
+        { name: '奶嘴安抚', creativeWordId: 5 },
+        { name: '哼唧', creativeWordId: 6 },
+        { name: '侧漏', creativeWordId: 7 },
+        { name: '梦哭', creativeWordId: 8 },
+        { name: '梦笑', creativeWordId: 9 }
 
       ],
-      cursorIndex: "", // 光标位置
+      cursorIndex: '', // 光标位置
 
       growingForm: {
         title: '',
@@ -118,12 +123,10 @@ export default {
       },
 
       growingAIForm: {
-        content: "",
+        content: ''
       },
 
-
-      tableData: [],
-
+      tableData: []
 
     }
   },
@@ -143,9 +146,9 @@ export default {
     handleClose(done) {
       this.$confirm('确认关闭？')
         .then(_ => {
-          done();
+          done()
         })
-        .catch(_ => { });
+        .catch(_ => { })
     },
 
     aiGenEvent() {
@@ -156,90 +159,76 @@ export default {
         text: 'Loading',
         spinner: 'el-icon-loading',
         background: 'rgba(0, 0, 0, 0.7)'
-      });
-
-
-      geneContentReq(data).then((res) => {
-
-        if (res.code === 200) {
-          console.log(res.data)
-          this.growingForm = res.data
-          loading.close();
-
-        } else {
-          loading.close();
-        }
       })
 
+      geneContentReq(data).then((res) => {
+        if (res.code === 200) {
+          this.growingForm = res.data
+          loading.close()
+        } else {
+          loading.close()
+        }
+      })
     },
 
     handleClick(tab, event) {
-      console.log(tab, event);
     },
 
     resetForm(formName) {
-      this.$refs[formName].resetFields();
+      this.$refs[formName].resetFields()
     },
     // 获取光标位置
     handleInputBlur(e) {
-      this.cursorIndex = e.srcElement.selectionStart;
+      this.cursorIndex = e.srcElement.selectionStart
     },
 
     btnClick(label) {
       // 将文本内容在光标位置进行拆分
-      const txt = this.growingForm.content;
-      const start = txt.substring(0, this.cursorIndex);
-      const end = txt.substring(this.cursorIndex, txt.length);
+      const txt = this.growingForm.content
+      const start = txt.substring(0, this.cursorIndex)
+      const end = txt.substring(this.cursorIndex, txt.length)
 
       // 插入关键词
-      this.growingForm.content = start + `#${label} ` + end;
+      this.growingForm.content = start + `#${label} ` + end
 
       // 获取文本框，设置焦点，处理光标位置
       if (this.$refs.inputWord) {
         // this.$refs.inputWord.focus();
         this.$nextTick(() => {
-          var a = this.$refs.inputWord.$el.firstElementChild;
-          a.focus();
-          a.selectionStart = this.cursorIndex + label.length + 2;
-          a.selectionEnd = this.cursorIndex + label.length + 2;
-        });
+          var a = this.$refs.inputWord.$el.firstElementChild
+          a.focus()
+          a.selectionStart = this.cursorIndex + label.length + 2
+          a.selectionEnd = this.cursorIndex + label.length + 2
+        })
       }
     },
 
     showGrowingList() {
       const data = { ...this.pageInfo, ...this.formInline }
-      console.log('--------data----', data)
       showGrowingListReq().then(res => {
         if (res.code === 200) {
-          console.log('data', res.data)
           this.tableData = res.data
         }
       })
-
     },
 
     onSubmit(formName) {
       this.$refs[formName].validate((valid) => {
         if (valid) {
-
           this.showGrowingList()
-
         } else {
-          console.log('error submit!!')
           return false
         }
       })
-
     },
 
     addEvent() {
       const data = this.growingForm
 
       addGrowingReq(data).then((res) => {
-
         if (res.code === 200) {
-          this.resetForm("growingForm")
-          this.activeName = "first"
+          this.resetForm('growingForm')
+          this.activeName = 'first'
 
           this.tableData = res.data
           this.showGrowingList()
@@ -248,7 +237,6 @@ export default {
     },
 
     handleCurrentChange(val) {
-      console.log(`当前页: ${val}`)
     },
 
     clearFilter() {

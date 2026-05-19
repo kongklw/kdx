@@ -1,5 +1,4 @@
 import json
-import logging
 import base64
 from uuid import uuid4
 from typing import Any, Dict, Optional, AsyncIterator
@@ -9,6 +8,7 @@ import asyncio
 import os
 import contextlib
 from urllib.parse import quote
+from loguru import logger
 
 from ..core.config import Settings
 from ..core.security import extract_token_from_headers, verify_jwt
@@ -30,7 +30,7 @@ from langchain_core.runnables import RunnableGenerator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.memory import MemorySaver as InMemorySaver
 
 try:
     from langgraph.prebuilt import create_react_agent
@@ -43,8 +43,6 @@ except Exception:
 
 # from dotenv import load_dotenv
 # load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 @tool
@@ -498,11 +496,12 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
     async def send_audio():
         try:
             async for audio_chunk in audio_stream:
-
+                print(f'4 send audio chunk bytes: {len(audio_chunk)}')
                 logger.info("stt.send_audio bytes=%s", len(audio_chunk))
                 await stt.send_audio(audio_chunk)
 
         finally:
+            print('1.1 已经结束对audio_stream的处理')
             with contextlib.suppress(Exception):
                 await stt.finish()
             with contextlib.suppress(Exception):
@@ -512,10 +511,11 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
 
     try:
         async for event in stt.receive_events():
-
+            print(f'1.2 receive event: {event}')
             logger.info("stt.event type=%s", getattr(event, "type", None))
             yield event
     finally:
+        print(f'1.3 处理完结束receive event')
         with contextlib.suppress(asyncio.CancelledError):
             send_task.cancel()
             await send_task
@@ -549,6 +549,7 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
     # using the checkpointer (InMemorySaver) configured in the agent
     thread_id = str(uuid4())
     async for event in event_stream:
+        # Pass through all events to downstream consumers
         yield event
         logger.info(f'agent stream event --> {event}')
         if event.type == 'stt_output':
@@ -560,6 +561,7 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
                 )
 
                 async for message, metadata in stream:
+                    print(f'2.1 message {message} and meta_data {metadata}')
                     if isinstance(message, AIMessage):
                         yield AgentChunkEvent.create(message.text)
 
@@ -696,7 +698,7 @@ async def voice_agent_langchain(
     async def websocket_audio_stream() -> AsyncIterator[bytes]:
         while True:
             message = await ws.receive()
-
+            print(f'receive messages are {message}')
             msg_type = message.get("type")
             has_bytes = message.get("bytes") is not None
             text = message.get("text")
@@ -709,12 +711,15 @@ async def voice_agent_langchain(
                 continue
             data = message.get("bytes")
             if data is not None:
+                print(f'7 data is not none: {data}')
                 yield data
                 continue
             text = message.get("text")
+            print(f'8 text: {text}')
             if text is None:
                 continue
             payload = _as_json(text)
+            print(f'9 payload: {payload}')
             if payload and payload.get("type") == "ping":
                 try:
                     await ws.send_json({"type": "pong"})
@@ -722,11 +727,23 @@ async def voice_agent_langchain(
                     return
 
     try:
+        '''
+        在 LangChain 中，所有可运行的组件（如 LLM、Prompt、Parser、Custom Runnable 等）都实现了 Runnable 接口。这个接口定义了一系列标准方法，包括：
+        invoke / ainvoke：单次调用
+        batch / abatch：批量调用
+        stream / astream：流式输出
+        transform / atransform‌：‌流式转换‌，即接收一个异步迭代器（Async Iterator），处理其中的每个元素，并返回一个新的异步迭代器。
+        因此，pipeline.atransform 是 Runnable 基类提供的一个原生异步方法，用于处理流式数据管道。
+        
+        '''
         output_stream = pipeline.atransform(websocket_audio_stream())
 
         # Process all events from the pipeline, sending events back to the client
         async for event in output_stream:
-            await ws.send_json(event_to_dict(event))
+            print(f'6 output_stream events are {event}')
+            data = event_to_dict(event)
+            print(f'7 event to dict data is {data}')
+            await ws.send_json(data)
     except WebSocketDisconnect:
         return
     except Exception:

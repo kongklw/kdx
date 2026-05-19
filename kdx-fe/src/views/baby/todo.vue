@@ -2,25 +2,34 @@
   <div class="dashboard-editor-container">
     <div>
       <el-row :gutter="8">
-        <el-col :xs="{ span: 24 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 6 }" :xl="{ span: 6 }"
-          style="margin-bottom:30px;">
+        <el-col
+          :xs="{ span: 24 }"
+          :sm="{ span: 12 }"
+          :md="{ span: 12 }"
+          :lg="{ span: 6 }"
+          :xl="{ span: 6 }"
+          style="margin-bottom:30px;"
+        >
           <todo-list />
         </el-col>
       </el-row>
     </div>
 
-
     <div>
-      <el-card class="box-card" v-for="(card) in todoTableList" :key="card.date">
+      <el-card v-for="(card) in todoTableList" :key="card.date" class="box-card">
         <div slot="header" class="clearfix">
           <span>{{ `日期: ${card.date}` }}</span>
         </div>
 
         <div>
-            <el-checkbox v-for="item in card.date_items" :label="item.text" v-model="item.done" 
-              :key="item.text"></el-checkbox>
+          <el-checkbox
+            v-for="item in card.date_items"
+            :key="item.text"
+            v-model="item.done"
+            :label="item.text"
+          />
         </div>
-      
+
       </el-card>
     </div>
 
@@ -32,18 +41,17 @@
 import TodoList from './components/TodoList'
 import { addTodoListReq, updateTodoListReq, showTodoListReq, deleteTodoListReq, showTodoTableReq } from '@/api/baby'
 
-
 export default {
   name: 'BabyTodo',
   components: {
-    TodoList,
+    TodoList
 
   },
 
   data() {
     return {
-      range_date: { start_date: this.moment().subtract(1, "weeks").format('YYYY-MM-DD'), end_date: this.moment().format('YYYY-MM-DD'), },
-      todoTableList: [],
+      range_date: { start_date: this.moment().subtract(1, 'weeks').format('YYYY-MM-DD'), end_date: this.moment().format('YYYY-MM-DD') },
+      todoTableList: []
     }
   },
   mounted() {
@@ -64,23 +72,18 @@ export default {
     showTodoTable() {
       showTodoTableReq(this.range_date).then(res => {
         if (res.code === 200) {
-          console.log('todo table-----------', res.data)
           this.todoTableList = res.data
         }
       })
     },
 
-
-
-
     showTodoList() {
       showTodoListReq(this.range_date).then(res => {
         if (res.code === 200) {
-          console.log('todo-----------', res.data)
           this.todos = res.data
         }
       })
-    },
+    }
 
   }
 }

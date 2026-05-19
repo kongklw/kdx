@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  kdx-ws-be:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      # 禁用 ONNX Runtime CPU 优化（兼容更多 CPU 型号）
+      - ORT_DISABLE_CPU_OPTIMIZATION=1
+      - ONNXRUNTIME_DISABLE_OPTIMIZATION=1
+      # Redis 配置
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      # 数据库配置
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=kdx
+      - DB_USER=root
+      - DB_PASSWORD=password
+    depends_on:
+      - redis
+      - mysql
+    networks:
+      - kdx-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - kdx-network
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: kdx
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - kdx-network
+
+volumes:
+  mysql_data:
+
+networks:
+  kdx-network:
+    driver: bridge

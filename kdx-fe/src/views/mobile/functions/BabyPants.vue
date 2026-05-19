@@ -331,7 +331,6 @@ export default {
           }
         }
       } catch (error) {
-        console.error(error)
         this.finished = true
       } finally {
         this.loading = false
@@ -373,7 +372,6 @@ export default {
           Toast.fail(res.msg || '添加失败')
         }
       } catch (error) {
-        console.error(error)
         Toast.fail('添加失败')
       }
     },
@@ -392,7 +390,6 @@ export default {
               Toast.fail(res.msg || '删除失败')
             }
           } catch (error) {
-            console.error(error)
             Toast.fail('删除失败')
           }
         })

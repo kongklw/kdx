@@ -347,7 +347,6 @@ export default {
           this.babyInfo = {}
         }
       } catch (e) {
-        console.error(e)
       }
     },
     formatGender(val) {

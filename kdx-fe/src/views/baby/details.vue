@@ -7,8 +7,14 @@
     </el-row>
 
     <el-row :gutter="8">
-      <el-col :xs="{ span: 24 }" :sm="{ span: 12 }" :md="{ span: 12 }" :lg="{ span: 6 }" :xl="{ span: 6 }"
-        style="margin-bottom:30px;">
+      <el-col
+        :xs="{ span: 24 }"
+        :sm="{ span: 12 }"
+        :md="{ span: 12 }"
+        :lg="{ span: 6 }"
+        :xl="{ span: 6 }"
+        style="margin-bottom:30px;"
+      >
         <todo-list />
       </el-col>
     </el-row>
@@ -33,7 +39,7 @@ export default {
     PanelGroup,
     LineChart,
     TodoList,
-    EventTab,
+    EventTab
     // RaddarChart,
     // PieChart,
     // BarChart,
@@ -57,7 +63,6 @@ export default {
   },
   mounted() {
     const date = this.$route.query.date
-    console.log('跳转过来传的值日期为 ', date)
     this.obtainLineChartData()
     this.dataRefresh()
   },
@@ -77,7 +82,6 @@ export default {
       }
 
       this.intervalId = setInterval(() => {
-        console.log('refresh')
         this.obtainLineChartData()
       }, 10000)
     },
@@ -95,7 +99,6 @@ export default {
     },
     obtainLineChartData() {
       lineChartReq().then((res) => {
-        console.log(res)
         if (res.code === 200) {
           const data = res.data
           this.totalLineChartData = data.totalLineChartData

@@ -3,6 +3,7 @@ name = "kdx-ws-be"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+  "insightface>=0.7",
   "fastapi==0.115.12",
   "uvicorn==0.34.0",
   "python-dotenv==1.0.1",
@@ -13,6 +14,8 @@ dependencies = [
   "langchain-openai>=0.2,<0.4",
   "langchain-core>=0.3,<0.4",
   "langgraph>=0.2,<0.4",
+  "loguru>=0.7.3",
+  "python-multipart>=0.0.29",
 ]
 
 [build-system]
@@ -24,3 +27,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.uv.sources.pypi]
+url = "https://mirrors.aliyun.com/pypi/simple/"

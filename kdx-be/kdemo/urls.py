@@ -50,5 +50,6 @@ urlpatterns = [
 
                   path('file/', include("fileUpload.urls")),
                   path('rag/', include("rag.urls")),
+                  path('face/', include("face.urls")),
 
               ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

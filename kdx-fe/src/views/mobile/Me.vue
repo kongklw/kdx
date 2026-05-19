@@ -237,7 +237,6 @@ export default {
           this.babyInfo = res.data
         }
       } catch (error) {
-        console.error(error)
       }
     },
     openEditPopup() {

@@ -44,14 +44,13 @@ export default {
     return {
       basicInfoText: {
         milkVolumes: 800,
-        refermilkVolumes: '800-1000',
-       
+        refermilkVolumes: '800-1000'
+
       }
     }
   },
   watch: {
     basicInfo(newVal) {
-      console.log('hahaha basicinfo ', newVal)
       this.basicInfoText = newVal
     }
   },

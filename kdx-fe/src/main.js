@@ -1,6 +1,7 @@
 import Vue from 'vue'
 
 import Cookies from 'js-cookie'
+import service from '@/utils/request'
 
 import 'normalize.css/normalize.css' // a modern alternative to CSS resets
 
@@ -141,6 +142,8 @@ Vue.use(Element, {
 Vue.prototype.moment = moment
 
 Vue.prototype.$BASE_API = process.env.VUE_APP_BASE_API
+
+Vue.prototype.$axios = service
 
 // register global utility filters
 Object.keys(filters).forEach(key => {
