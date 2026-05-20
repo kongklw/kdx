@@ -9,6 +9,7 @@ env:
   SSH_USER: ${{ secrets.SSH_USER }}
   SSH_KEY: ${{ secrets.SSH_KEY }}
   PROJECT_PATH: /root/kdx
+  DOCKER_BUILDKIT: 1
 
 jobs:
   detect-changes:
@@ -58,6 +59,7 @@ jobs:
     needs: detect-changes
     if: contains(needs.detect-changes.outputs.changed_modules, 'frontend')
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -76,6 +78,10 @@ jobs:
         working-directory: kdx-fe
         run: npm run build:prod
 
+      - name: Compress dist
+        working-directory: kdx-fe
+        run: tar -czf dist.tar.gz dist
+
       - name: Upload dist to ECS
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -83,13 +89,27 @@ jobs:
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
           port: 22
-          source: "kdx-fe/dist"
+          source: "kdx-fe/dist.tar.gz"
           target: "${{ env.PROJECT_PATH }}/"
+
+      - name: Extract dist on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          port: 22
+          username: ${{ env.SSH_USER }}
+          key: ${{ env.SSH_KEY }}
+          script: |
+            cd ${{ env.PROJECT_PATH }}
+            rm -rf kdx-fe/dist
+            tar -xzf kdx-fe/dist.tar.gz -C kdx-fe/
+            rm kdx-fe/dist.tar.gz
 
   deploy-backend:
     needs: detect-changes
     if: contains(needs.detect-changes.outputs.changed_modules, 'backend')
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -100,18 +120,28 @@ jobs:
           port: 22
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
+          script_timeout: 5400
           script: |
             set -e
             cd ${{ env.PROJECT_PATH }}
             git fetch origin main
             git reset --hard origin/main
             chmod +777 start.sh
+            
+            # 检查中间件是否运行，否则先启动
+            if ! docker compose ps -q redis | grep -q . || ! docker compose ps -q db | grep -q .; then
+              echo "启动中间件..."
+              ./start.sh middleware
+            fi
+            
+            # 使用 --no-cache 避免缓存问题
             ./start.sh backend
 
   deploy-fastapi:
     needs: detect-changes
     if: contains(needs.detect-changes.outputs.changed_modules, 'fastapi')
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -122,18 +152,27 @@ jobs:
           port: 22
           username: ${{ env.SSH_USER }}
           key: ${{ env.SSH_KEY }}
+          script_timeout: 5400
           script: |
             set -e
             cd ${{ env.PROJECT_PATH }}
             git fetch origin main
             git reset --hard origin/main
             chmod +777 start.sh
+            
+            # 检查中间件是否运行，否则先启动
+            if ! docker compose ps -q redis | grep -q .; then
+              echo "启动 Redis..."
+              docker compose up -d redis
+            fi
+            
             ./start.sh fastapi
 
   deploy-nginx:
     needs: [detect-changes, build-frontend]
     if: contains(needs.detect-changes.outputs.changed_modules, 'frontend') || contains(needs.detect-changes.outputs.changed_modules, 'nginx')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

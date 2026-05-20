@@ -192,8 +192,8 @@ deploy_backend() {
 deploy_kdx_ws() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
-    # FastAPI 端口不对外映射，检查容器状态
-    wait_for_container "kdx-ws-be"
+    # FastAPI 端口不对外映射，检查容器状态（使用服务名 kdx_ws）
+    wait_for_container "kdx_ws"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
 
