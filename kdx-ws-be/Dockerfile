@@ -1,6 +1,7 @@
 # 使用 Python 3.12 基础镜像
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
+RUN echo "Hello, Docker!"
 # 配置阿里云镜像源
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
