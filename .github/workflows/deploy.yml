@@ -16,12 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       changed_modules: ${{ steps.detect.outputs.changed_modules }}
+      backend_deps_changed: ${{ steps.detect.outputs.backend_deps_changed }}
+      fastapi_deps_changed: ${{ steps.detect.outputs.fastapi_deps_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Detect changed modules
+      - name: Detect changed modules and dependencies
         id: detect
         run: |
           CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
@@ -29,31 +31,56 @@ jobs:
           echo "$CHANGED_FILES"
 
           MODULES=""
+          BACKEND_DEPS_CHANGED="false"
+          FASTAPI_DEPS_CHANGED="false"
 
+          # 检测后端模块变化
           if echo "$CHANGED_FILES" | grep -qE "^kdx-be/"; then
             MODULES="$MODULES backend,"
+            
+            # 检测后端依赖文件变化
+            if echo "$CHANGED_FILES" | grep -qE "^kdx-be/(requirements\.txt|Dockerfile|pip\.conf|scripts/download_insightface_models\.py)"; then
+              BACKEND_DEPS_CHANGED="true"
+              echo "⚠️ Backend dependencies changed, will rebuild image"
+            fi
           fi
 
+          # 检测前端模块变化
           if echo "$CHANGED_FILES" | grep -qE "^kdx-fe/"; then
             MODULES="$MODULES frontend,"
           fi
 
+          # 检测 FastAPI 模块变化
           if echo "$CHANGED_FILES" | grep -qE "^kdx-ws-be/"; then
             MODULES="$MODULES fastapi,"
+            
+            # 检测 FastAPI 依赖文件变化
+            if echo "$CHANGED_FILES" | grep -qE "^kdx-ws-be/(pyproject\.toml|uv\.lock|Dockerfile)"; then
+              FASTAPI_DEPS_CHANGED="true"
+              echo "⚠️ FastAPI dependencies changed, will rebuild image"
+            fi
           fi
 
+          # 检测 Nginx/配置变化
           if echo "$CHANGED_FILES" | grep -qE "^compose/|^docker-compose\.yaml"; then
             MODULES="$MODULES nginx,"
           fi
 
+          # 清理末尾逗号
           MODULES=$(echo "$MODULES" | sed 's/,$//')
 
+          # 如果没有检测到变化，默认部署所有模块
           if [ -z "$MODULES" ]; then
             MODULES="backend,frontend,fastapi,nginx"
           fi
 
           echo "Changed modules: $MODULES"
+          echo "Backend deps changed: $BACKEND_DEPS_CHANGED"
+          echo "FastAPI deps changed: $FASTAPI_DEPS_CHANGED"
+          
           echo "changed_modules=$MODULES" >> $GITHUB_OUTPUT
+          echo "backend_deps_changed=$BACKEND_DEPS_CHANGED" >> $GITHUB_OUTPUT
+          echo "fastapi_deps_changed=$FASTAPI_DEPS_CHANGED" >> $GITHUB_OUTPUT
 
   build-frontend:
     needs: detect-changes
@@ -113,7 +140,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy backend
+      - name: Deploy backend (with smart rebuild)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
@@ -134,8 +161,14 @@ jobs:
               ./start.sh middleware
             fi
             
-            # 使用 --no-cache 避免缓存问题
-            ./start.sh backend
+            # 根据依赖是否变化选择部署方式
+            if [ "${{ needs.detect-changes.outputs.backend_deps_changed }}" = "true" ]; then
+              echo "🔄 后端依赖变化，执行完整构建部署..."
+              ./start.sh backend
+            else
+              echo "⚡ 后端依赖未变化，执行快速重启..."
+              ./start.sh -r backend
+            fi
 
   deploy-fastapi:
     needs: detect-changes
@@ -145,7 +178,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy FastAPI
+      - name: Deploy FastAPI (with smart rebuild)
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.SSH_HOST }}
@@ -166,7 +199,14 @@ jobs:
               docker compose up -d redis
             fi
             
-            ./start.sh fastapi
+            # 根据依赖是否变化选择部署方式
+            if [ "${{ needs.detect-changes.outputs.fastapi_deps_changed }}" = "true" ]; then
+              echo "🔄 FastAPI 依赖变化，执行完整构建部署..."
+              ./start.sh fastapi
+            else
+              echo "⚡ FastAPI 依赖未变化，执行快速重启..."
+              ./start.sh -r fastapi
+            fi
 
   deploy-nginx:
     needs: [detect-changes, build-frontend]
