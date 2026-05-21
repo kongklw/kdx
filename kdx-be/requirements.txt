@@ -89,7 +89,7 @@ multidict==6.1.0
 mypy-extensions==1.0.0
 mysqlclient==2.2.4
 networkx==3.6.1
-numpy==2.4.5
+numpy>=1.26.2,<2
 oauthlib==3.2.2
 onnx==1.21.0
 onnxruntime==1.26.0

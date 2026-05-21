@@ -22,7 +22,8 @@ COPY ./pyproject.toml /app/pyproject.toml
 # 安装依赖（使用 uv）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
     pip install uv -i https://mirrors.aliyun.com/pypi/simple/ && \
-    uv sync --no-cache
+    uv config set registry.index-url https://mirrors.aliyun.com/pypi/simple/ && \
+    uv sync
 
 # 复制应用代码和脚本
 COPY ./app /app/app
