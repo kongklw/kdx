@@ -38,8 +38,8 @@ jobs:
           if echo "$CHANGED_FILES" | grep -qE "^kdx-be/"; then
             MODULES="$MODULES backend,"
             
-            # 检测后端依赖文件变化
-            if echo "$CHANGED_FILES" | grep -qE "^kdx-be/(requirements\.txt|Dockerfile|pip\.conf|scripts/download_insightface_models\.py)"; then
+            # 检测后端依赖文件变化（uv管理）
+            if echo "$CHANGED_FILES" | grep -qE "^kdx-be/(pyproject\.toml|uv\.lock|Dockerfile|scripts/download_insightface_models\.py)"; then
               BACKEND_DEPS_CHANGED="true"
               echo "⚠️ Backend dependencies changed, will rebuild image"
             fi
