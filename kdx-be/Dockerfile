@@ -1,5 +1,5 @@
-# 使用 Python 官方镜像
-FROM python:3.12-slim
+# 使用华为云 Python 镜像（阿里云ECS环境）
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
 # 替换软件源为阿里云
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
