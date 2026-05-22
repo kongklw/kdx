@@ -28,10 +28,12 @@ def download_insightface_models():
         app.prepare(ctx_id=0, det_size=(640, 640))
         
         print("=== InsightFace 模型预下载完成 ===")
-        print(f"模型路径: {insightface.model_zoo.get_model_zoo_path()}")
+        # 获取模型路径（兼容新版 insightface）
+        model_path = os.path.expanduser('~/.insightface/models')
+        print(f"模型路径：{model_path}")
         
     except Exception as e:
-        print(f"模型下载失败: {e}")
+        print(f"模型下载失败：{e}")
         print("请确保网络可以访问 InsightFace 模型仓库")
         sys.exit(1)
 

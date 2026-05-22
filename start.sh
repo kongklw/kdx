@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # KDX 项目一键部署脚本
-# 支持按需部署，智能启动顺序，健康检查
+# 本地构建 + 启动，支持按需部署、智能启动顺序、健康检查
 # ==============================================================================
 
 set -e
@@ -12,6 +12,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 项目路径
@@ -42,7 +43,7 @@ is_service_running() {
     ${DOCKER_COMPOSE} ps -q "$service" | grep -q .
 }
 
-# 检查容器是否健康（兼容服务名和容器名）
+# 检查容器是否健康
 wait_for_container() {
     local container_name=$1
     local timeout=${2:-$MAX_WAIT}
@@ -51,16 +52,12 @@ wait_for_container() {
     
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
-        # 尝试通过服务名获取容器 ID
         local container_id=$(${DOCKER_COMPOSE} ps -q "$container_name" 2>/dev/null)
-        
-        # 如果服务名方式失败，尝试通过容器名直接查找
         if [ -z "$container_id" ]; then
             container_id=$(docker ps -q --filter "name=^/${container_name}$" 2>/dev/null)
         fi
         
         if [ -n "$container_id" ]; then
-            # 使用 docker inspect 检查容器状态（兼容旧版本）
             local status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
             if [ "$status" = "running" ]; then
                 echo -e "${GREEN}${container_name} 容器已就绪${NC}"
@@ -77,7 +74,7 @@ wait_for_container() {
     return 1
 }
 
-# 检查端口是否就绪（用于有端口映射的服务）
+# 检查端口是否就绪
 wait_for_port() {
     local service=$1
     local port=$2
@@ -118,7 +115,7 @@ show_help() {
     echo "  -s, --start         启动服务（默认）"
     echo "  -d, --down          停止并移除容器"
     echo "  -r, --restart       重启服务"
-    echo "  -b, --build         构建镜像（不启动）"
+    echo "  -b, --build         仅构建镜像（不启动）"
     echo "  -u, --update        拉取最新代码并部署"
     echo "  -l, --logs          查看日志"
     echo "  -c, --clean         清理停止的容器和无用镜像"
@@ -127,17 +124,16 @@ show_help() {
     echo "  all          部署所有服务（默认）"
     echo "  backend      仅部署后端 (Django) - 需要中间件已运行"
     echo "  frontend     仅部署前端 (Vue) - 需要中间件已运行"
-    echo "  fastapi      仅部署 FastAPI 服务 (含语音 WebSocket) - 需要中间件已运行"
+    echo "  fastapi      仅部署 FastAPI 服务 - 需要中间件已运行"
     echo "  nginx        仅部署 Nginx"
     echo "  middleware   仅部署中间件 (MySQL + Redis)"
     echo ""
     echo -e "${YELLOW}示例:${NC}"
     echo "  $0                    # 启动所有服务（含中间件）"
     echo "  $0 middleware         # 仅启动 MySQL + Redis"
-    echo "  $0 backend            # 仅重启后端（假设中间件已运行）"
+    echo "  $0 backend            # 仅构建并启动后端"
     echo "  $0 -u backend         # 更新代码并部署后端"
     echo "  $0 -r backend         # 重启后端"
-    echo "  $0 frontend           # 仅构建并部署前端"
     echo ""
     echo -e "${YELLOW}部署策略:${NC}"
     echo "  - 中间件(middleware): MySQL + Redis，通常不需要频繁重启"
@@ -152,11 +148,9 @@ build_frontend() {
 
     if [ ! -d "node_modules" ]; then
         echo -e "${BLUE}安装依赖...${NC}"
-        # 检查是否存在 package-lock.json
         if [ -f "package-lock.json" ]; then
             npm ci
         else
-            # 如果没有 lock 文件，使用 npm install（安装全部依赖，包括开发依赖）
             npm install
         fi
     fi
@@ -170,21 +164,15 @@ build_frontend() {
 # 部署后端
 deploy_backend() {
     echo -e "${YELLOW}=== 部署后端服务 ===${NC}"
-
-    # 构建并启动后端容器
     ${DOCKER_COMPOSE} up -d --build --no-deps web
-
-    # 等待容器启动（web 服务端口不对外映射，检查容器状态）
     wait_for_container "web"
-
-    # 执行数据库迁移（使用 service 名称：web）
+    
     echo -e "${BLUE}执行数据库迁移...${NC}"
     ${DOCKER_COMPOSE} exec -T web python manage.py migrate --noinput
-
-    # 收集静态文件
+    
     echo -e "${BLUE}收集静态文件...${NC}"
     ${DOCKER_COMPOSE} exec -T web python manage.py collectstatic --noinput
-
+    
     echo -e "${GREEN}后端部署完成！${NC}"
 }
 
@@ -192,7 +180,6 @@ deploy_backend() {
 deploy_kdx_ws() {
     echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
-    # FastAPI 端口不对外映射，检查容器状态（使用服务名 kdx_ws）
     wait_for_container "kdx_ws"
     echo -e "${GREEN}FastAPI 部署完成！${NC}"
 }
@@ -201,62 +188,50 @@ deploy_kdx_ws() {
 deploy_nginx() {
     echo -e "${YELLOW}=== 部署 Nginx ===${NC}"
     
-    # 前端已在 GitHub Action 中构建，这里直接启动 Nginx
-    # 如果 dist 目录不存在，可能是首次部署或本地测试，提示用户
     if [ ! -d "${PROJECT_PATH}/kdx-fe/dist" ]; then
         echo -e "${RED}警告: 前端 dist 目录不存在！${NC}"
-        echo -e "${YELLOW}请确保前端已通过 GitHub Action 构建，或手动执行: cd kdx-fe && npm install && npm run build:prod${NC}"
+        echo -e "${YELLOW}正在自动构建前端...${NC}"
+        build_frontend
     fi
     
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
-    # Nginx有端口映射，检查端口
     wait_for_port "nginx" "80"
     echo -e "${GREEN}Nginx 部署完成！${NC}"
 }
 
-# 部署中间件 (MySQL + Redis)
+# 部署中间件
 deploy_middleware() {
     echo -e "${YELLOW}=== 部署中间件服务 (MySQL + Redis) ===${NC}"
     
-    # 启动 Redis（有端口映射）
-    ${DOCKER_COMPOSE} up -d --build --no-deps redis
+    ${DOCKER_COMPOSE} up -d --no-deps redis
     wait_for_port "redis" "6379"
     
-    # 启动 MySQL（有端口映射）
-    ${DOCKER_COMPOSE} up -d --build --no-deps db
+    ${DOCKER_COMPOSE} up -d --no-deps db
     wait_for_port "db" "3306"
     
     echo -e "${GREEN}中间件服务部署完成！${NC}"
 }
 
-
-
 # 部署所有服务
 deploy_all() {
     echo -e "${YELLOW}=== 部署所有服务 ===${NC}"
 
-    # 步骤1: 部署中间件（MySQL + Redis）
     echo -e "\n${BLUE}【步骤1/4】启动中间件${NC}"
     deploy_middleware
 
-    # 步骤2: 部署后端服务
     echo -e "\n${BLUE}【步骤2/4】启动后端服务${NC}"
     deploy_backend
 
-    # 步骤 3: 部署其他代码服务
-    echo -e "\n${BLUE}【步骤 3/4】启动 FastAPI 服务${NC}"
+    echo -e "\n${BLUE}【步骤3/4】启动 FastAPI 服务${NC}"
     deploy_kdx_ws
 
-
-    # 步骤4: 构建前端并部署 Nginx
-    echo -e "\n${BLUE}【步骤4/4】构建前端并启动 Nginx${NC}"
+    echo -e "\n${BLUE}【步骤4/4】启动 Nginx${NC}"
     deploy_nginx
 
     echo -e "\n${GREEN}=============================================${NC}"
     echo -e "${GREEN}          所有服务部署完成！                 ${NC}"
     echo -e "${GREEN}=============================================${NC}"
     
-    # 显示服务状态
     echo -e "\n${YELLOW}服务状态概览:${NC}"
     ${DOCKER_COMPOSE} ps
 }
@@ -264,7 +239,8 @@ deploy_all() {
 # 拉取最新代码
 pull_code() {
     echo -e "${YELLOW}=== 拉取最新代码 ===${NC}"
-    git pull origin main
+    git fetch origin main
+    git reset --hard origin/main
     echo -e "${GREEN}代码拉取完成！${NC}"
 }
 
@@ -273,7 +249,6 @@ main() {
     local action="start"
     local modules=("all")
 
-    # 解析参数
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -h|--help)
@@ -320,32 +295,17 @@ main() {
         esac
     done
 
-    # 切换到项目目录
     cd "${PROJECT_PATH}"
 
-    # 执行操作
     case "$action" in
         start)
             case "${modules[0]}" in
-                all)
-                    deploy_all
-                    ;;
-                backend)
-                    deploy_backend
-                    ;;
-                frontend)
-                    build_frontend
-                    deploy_nginx
-                    ;;
-                fastapi)
-                    deploy_kdx_ws
-                    ;;
-                nginx)
-                    deploy_nginx
-                    ;;
-                middleware)
-                    deploy_middleware
-                    ;;
+                all) deploy_all ;;
+                backend) deploy_backend ;;
+                frontend) build_frontend; deploy_nginx ;;
+                fastapi) deploy_kdx_ws ;;
+                nginx) deploy_nginx ;;
+                middleware) deploy_middleware ;;
             esac
             ;;
 
@@ -358,24 +318,12 @@ main() {
         restart)
             echo -e "${YELLOW}=== 重启服务 ===${NC}"
             case "${modules[0]}" in
-                all)
-                    ${DOCKER_COMPOSE} restart
-                    ;;
-                backend)
-                    ${DOCKER_COMPOSE} restart web
-                    ;;
-                frontend)
-                    ${DOCKER_COMPOSE} restart nginx
-                    ;;
-                fastapi)
-                    ${DOCKER_COMPOSE} restart kdx_ws
-                    ;;
-                nginx)
-                    ${DOCKER_COMPOSE} restart nginx
-                    ;;
-                middleware)
-                    ${DOCKER_COMPOSE} restart redis db
-                    ;;
+                all) ${DOCKER_COMPOSE} restart ;;
+                backend) ${DOCKER_COMPOSE} restart web ;;
+                frontend) ${DOCKER_COMPOSE} restart nginx ;;
+                fastapi) ${DOCKER_COMPOSE} restart kdx_ws ;;
+                nginx) ${DOCKER_COMPOSE} restart nginx ;;
+                middleware) ${DOCKER_COMPOSE} restart redis db ;;
             esac
             echo -e "${GREEN}服务已重启！${NC}"
             ;;
@@ -383,25 +331,12 @@ main() {
         build)
             echo -e "${YELLOW}=== 构建镜像 ===${NC}"
             case "${modules[0]}" in
-                all)
-                    ${DOCKER_COMPOSE} build
-                    ;;
-                backend)
-                    ${DOCKER_COMPOSE} build web
-                    ;;
-                frontend)
-                    build_frontend
-                    ${DOCKER_COMPOSE} build nginx
-                    ;;
-                fastapi)
-                    ${DOCKER_COMPOSE} build kdx_ws
-                    ;;
-                nginx)
-                    ${DOCKER_COMPOSE} build nginx
-                    ;;
-                middleware)
-                    ${DOCKER_COMPOSE} build redis db
-                    ;;
+                all) ${DOCKER_COMPOSE} build ;;
+                backend) ${DOCKER_COMPOSE} build web ;;
+                frontend) build_frontend; ${DOCKER_COMPOSE} build nginx ;;
+                fastapi) ${DOCKER_COMPOSE} build kdx_ws ;;
+                nginx) ${DOCKER_COMPOSE} build nginx ;;
+                middleware) ${DOCKER_COMPOSE} build redis db ;;
             esac
             echo -e "${GREEN}镜像构建完成！${NC}"
             ;;
@@ -409,70 +344,36 @@ main() {
         update)
             pull_code
             case "${modules[0]}" in
-                all)
-                    deploy_all
-                    ;;
-                backend)
-                    deploy_backend
-                    ;;
-                frontend)
-                    build_frontend
-                    deploy_nginx
-                    ;;
-                fastapi)
-                    deploy_kdx_ws
-                    ;;
-                nginx)
-                    deploy_nginx
-                    ;;
-                middleware)
-                    deploy_middleware
-                    ;;
+                all) deploy_all ;;
+                backend) deploy_backend ;;
+                frontend) build_frontend; deploy_nginx ;;
+                fastapi) deploy_kdx_ws ;;
+                nginx) deploy_nginx ;;
+                middleware) deploy_middleware ;;
             esac
             ;;
 
         logs)
             echo -e "${YELLOW}=== 查看日志 ===${NC}"
             case "${modules[0]}" in
-                all)
-                    ${DOCKER_COMPOSE} logs -f
-                    ;;
-                backend)
-                    ${DOCKER_COMPOSE} logs -f web
-                    ;;
-                frontend)
-                    ${DOCKER_COMPOSE} logs -f nginx
-                    ;;
-                fastapi)
-                    ${DOCKER_COMPOSE} logs -f kdx_ws
-                    ;;
-                nginx)
-                    ${DOCKER_COMPOSE} logs -f nginx
-                    ;;
-                middleware)
-                    ${DOCKER_COMPOSE} logs -f redis db
-                    ;;
+                all) ${DOCKER_COMPOSE} logs -f ;;
+                backend) ${DOCKER_COMPOSE} logs -f web ;;
+                frontend) ${DOCKER_COMPOSE} logs -f nginx ;;
+                fastapi) ${DOCKER_COMPOSE} logs -f kdx_ws ;;
+                nginx) ${DOCKER_COMPOSE} logs -f nginx ;;
+                middleware) ${DOCKER_COMPOSE} logs -f redis db ;;
             esac
             ;;
 
         clean)
             echo -e "${YELLOW}=== 清理无用资源 ===${NC}"
-            echo -e "${BLUE}停止所有容器...${NC}"
             docker stop $(docker ps -aq) 2>/dev/null || true
-
-            echo -e "${BLUE}删除停止的容器...${NC}"
             docker rm $(docker ps -aq) 2>/dev/null || true
-
-            echo -e "${BLUE}删除无用镜像...${NC}"
             docker image prune -f
-
-            echo -e "${BLUE}删除无用网络...${NC}"
             docker network prune -f
-
             echo -e "${GREEN}清理完成！${NC}"
             ;;
     esac
 }
 
-# 执行主函数
 main "$@"
