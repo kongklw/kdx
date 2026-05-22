@@ -1,54 +1,45 @@
-﻿﻿#!/bin/bash
+#!/bin/bash
 
-# ==============================================================================
 # KDX 项目一键部署脚本
 # 本地构建 + 启动，支持按需部署、智能启动顺序、健康检查
-# ==============================================================================
 
 set -e
 
-# 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# 项目路径
 PROJECT_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 MAX_WAIT=300
 CHECK_INTERVAL=2
 
-# 优先使用 docker compose（新版），兼容旧版 docker-compose
 DOCKER_COMPOSE="docker compose"
 if ! docker compose version &> /dev/null; then
     if command -v docker-compose &> /dev/null; then
         DOCKER_COMPOSE="docker-compose"
     else
-        echo -e "${RED}错误: 未找到 docker-compose 或 docker compose${NC}"
+        echo -e "${RED}Error: docker-compose not found${NC}"
         exit 1
     fi
 fi
 
-# 检查是否在项目根目录
 if [ ! -f "${PROJECT_PATH}/docker-compose.yaml" ]; then
-    echo -e "${RED}错误: 请在项目根目录运行此脚本${NC}"
+    echo -e "${RED}Error: Please run in project root${NC}"
     exit 1
 fi
 
-# 检查服务是否正在运行
 is_service_running() {
     local service=$1
     ${DOCKER_COMPOSE} ps -q "$service" | grep -q .
 }
 
-# 检查容器是否健康
 wait_for_container() {
     local container_name=$1
     local timeout=${2:-$MAX_WAIT}
     
-    echo -e "${BLUE}等待 ${container_name} 容器就绪...${NC}"
+    echo -e "${BLUE}Waiting for $container_name...${NC}"
     
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
@@ -60,7 +51,7 @@ wait_for_container() {
         if [ -n "$container_id" ]; then
             local status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
             if [ "$status" = "running" ]; then
-                echo -e "${GREEN}${container_name} 容器已就绪${NC}"
+                echo -e "${GREEN}$container_name ready${NC}"
                 return 0
             fi
         fi
@@ -69,25 +60,24 @@ wait_for_container() {
         echo -ne "${YELLOW}.${NC}"
     done
     
-    echo -e "\n${RED}错误: ${container_name} 容器启动超时${NC}"
+    echo -e "\n${RED}Error: $container_name timeout${NC}"
     ${DOCKER_COMPOSE} logs "$container_name" 2>/dev/null | tail -20 || docker logs "$container_name" 2>/dev/null | tail -20
     return 1
 }
 
-# 检查端口是否就绪
 wait_for_port() {
     local service=$1
     local port=$2
     local host=${3:-localhost}
     local timeout=${4:-$MAX_WAIT}
     
-    echo -e "${BLUE}等待 ${service} 服务就绪...${NC}"
+    echo -e "${BLUE}Waiting for $service on port $port...${NC}"
     
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
         if is_service_running "$service"; then
             if timeout 1 bash -c "echo > /dev/tcp/$host/$port" 2>/dev/null; then
-                echo -e "${GREEN}${service} 服务已就绪${NC}"
+                echo -e "${GREEN}$service ready${NC}"
                 return 0
             fi
         fi
@@ -96,58 +86,48 @@ wait_for_port() {
         echo -ne "${YELLOW}.${NC}"
     done
     
-    echo -e "\n${RED}错误: ${service} 服务启动超时${NC}"
+    echo -e "\n${RED}Error: $service timeout${NC}"
     ${DOCKER_COMPOSE} logs "$service" | tail -20
     return 1
 }
 
-# 显示帮助信息
 show_help() {
-    echo -e "${BLUE}=============================================${NC}"
-    echo -e "${BLUE}          KDX 项目一键部署脚本               ${NC}"
-    echo -e "${BLUE}=============================================${NC}"
+    echo -e "${BLUE}=== KDX Deployment Script ===${NC}"
     echo ""
-    echo -e "${YELLOW}使用方法:${NC}"
-    echo "  $0 [选项] [模块...]"
+    echo "Usage: $0 [options] [module]"
     echo ""
-    echo -e "${YELLOW}选项:${NC}"
-    echo "  -h, --help          显示帮助信息"
-    echo "  -s, --start         启动服务（默认）"
-    echo "  -d, --down          停止并移除容器"
-    echo "  -r, --restart       重启服务"
-    echo "  -b, --build         仅构建镜像（不启动）"
-    echo "  -u, --update        拉取最新代码并部署"
-    echo "  -l, --logs          查看日志"
-    echo "  -c, --clean         清理停止的容器和无用镜像"
+    echo "Options:"
+    echo "  -h, --help          Show this help"
+    echo "  -s, --start         Start services (default)"
+    echo "  -d, --down          Stop and remove containers"
+    echo "  -r, --restart       Restart services"
+    echo "  -b, --build         Build images only"
+    echo "  -u, --update        Pull code and deploy"
+    echo "  -l, --logs          View logs"
+    echo "  -c, --clean         Clean unused resources"
     echo ""
-    echo -e "${YELLOW}模块（可选，不指定则部署全部）:${NC}"
-    echo "  all          部署所有服务（默认）"
-    echo "  backend      仅部署后端 (Django) - 需要中间件已运行"
-    echo "  frontend     仅部署前端 (Vue) - 需要中间件已运行"
-    echo "  fastapi      仅部署 FastAPI 服务 - 需要中间件已运行"
-    echo "  nginx        仅部署 Nginx"
-    echo "  middleware   仅部署中间件 (MySQL + Redis)"
+    echo "Modules:"
+    echo "  all          Deploy all services"
+    echo "  backend      Deploy Django backend"
+    echo "  frontend     Deploy Vue frontend"
+    echo "  fastapi      Deploy FastAPI service"
+    echo "  nginx        Deploy Nginx"
+    echo "  middleware   Deploy MySQL + Redis"
     echo ""
-    echo -e "${YELLOW}示例:${NC}"
-    echo "  $0                    # 启动所有服务（含中间件）"
-    echo "  $0 middleware         # 仅启动 MySQL + Redis"
-    echo "  $0 backend            # 仅构建并启动后端"
-    echo "  $0 -u backend         # 更新代码并部署后端"
-    echo "  $0 -r backend         # 重启后端"
-    echo ""
-    echo -e "${YELLOW}部署策略:${NC}"
-    echo "  - 中间件(middleware): MySQL + Redis，通常不需要频繁重启"
-    echo "  - 代码服务: backend, frontend, fastapi，开发时频繁更新"
-    echo "  - 建议先启动 middleware，再按需启动代码服务"
+    echo "Examples:"
+    echo "  $0                    # Start all services"
+    echo "  $0 middleware         # Start MySQL + Redis"
+    echo "  $0 backend            # Build and start backend"
+    echo "  $0 -u backend         # Update code and deploy backend"
+    echo "  $0 -r backend         # Restart backend"
 }
 
-# 构建前端
 build_frontend() {
-    echo -e "${YELLOW}=== 构建前端项目 ===${NC}"
+    echo -e "${YELLOW}=== Building frontend ===${NC}"
     cd "${PROJECT_PATH}/kdx-fe"
 
     if [ ! -d "node_modules" ]; then
-        echo -e "${BLUE}安装依赖...${NC}"
+        echo -e "${BLUE}Installing dependencies...${NC}"
         if [ -f "package-lock.json" ]; then
             npm ci
         else
@@ -155,53 +135,49 @@ build_frontend() {
         fi
     fi
 
-    echo -e "${BLUE}执行构建...${NC}"
+    echo -e "${BLUE}Building...${NC}"
     npm run build:prod
 
     cd "${PROJECT_PATH}"
 }
 
-# 部署后端
 deploy_backend() {
-    echo -e "${YELLOW}=== 部署后端服务 ===${NC}"
+    echo -e "${YELLOW}=== Deploying backend ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps web
     wait_for_container "web"
     
-    echo -e "${BLUE}执行数据库迁移...${NC}"
+    echo -e "${BLUE}Running migrations...${NC}"
     ${DOCKER_COMPOSE} exec -T web python manage.py migrate --noinput
     
-    echo -e "${BLUE}收集静态文件...${NC}"
+    echo -e "${BLUE}Collecting static files...${NC}"
     ${DOCKER_COMPOSE} exec -T web python manage.py collectstatic --noinput
     
-    echo -e "${GREEN}后端部署完成！${NC}"
+    echo -e "${GREEN}Backend deployed!${NC}"
 }
 
-# 部署 FastAPI
 deploy_kdx_ws() {
-    echo -e "${YELLOW}=== 部署 FastAPI 服务 ===${NC}"
+    echo -e "${YELLOW}=== Deploying FastAPI ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
     wait_for_container "kdx_ws"
-    echo -e "${GREEN}FastAPI 部署完成！${NC}"
+    echo -e "${GREEN}FastAPI deployed!${NC}"
 }
 
-# 部署 Nginx
 deploy_nginx() {
-    echo -e "${YELLOW}=== 部署 Nginx ===${NC}"
+    echo -e "${YELLOW}=== Deploying Nginx ===${NC}"
     
     if [ ! -d "${PROJECT_PATH}/kdx-fe/dist" ]; then
-        echo -e "${RED}警告: 前端 dist 目录不存在！${NC}"
-        echo -e "${YELLOW}正在自动构建前端...${NC}"
+        echo -e "${RED}Warning: dist not found!${NC}"
+        echo -e "${YELLOW}Building frontend...${NC}"
         build_frontend
     fi
     
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
     wait_for_port "nginx" "80"
-    echo -e "${GREEN}Nginx 部署完成！${NC}"
+    echo -e "${GREEN}Nginx deployed!${NC}"
 }
 
-# 部署中间件
 deploy_middleware() {
-    echo -e "${YELLOW}=== 部署中间件服务 (MySQL + Redis) ===${NC}"
+    echo -e "${YELLOW}=== Deploying middleware ===${NC}"
     
     ${DOCKER_COMPOSE} up -d --no-deps redis
     wait_for_port "redis" "6379"
@@ -209,42 +185,37 @@ deploy_middleware() {
     ${DOCKER_COMPOSE} up -d --no-deps db
     wait_for_port "db" "3306"
     
-    echo -e "${GREEN}中间件服务部署完成！${NC}"
+    echo -e "${GREEN}Middleware deployed!${NC}"
 }
 
-# 部署所有服务
 deploy_all() {
-    echo -e "${YELLOW}=== 部署所有服务 ===${NC}"
+    echo -e "${YELLOW}=== Deploying all services ===${NC}"
 
-    echo -e "\n${BLUE}【步骤1/4】启动中间件${NC}"
+    echo -e "\n${BLUE}[Step 1/4] Starting middleware${NC}"
     deploy_middleware
 
-    echo -e "\n${BLUE}【步骤2/4】启动后端服务${NC}"
+    echo -e "\n${BLUE}[Step 2/4] Starting backend${NC}"
     deploy_backend
 
-    echo -e "\n${BLUE}【步骤3/4】启动 FastAPI 服务${NC}"
+    echo -e "\n${BLUE}[Step 3/4] Starting FastAPI${NC}"
     deploy_kdx_ws
 
-    echo -e "\n${BLUE}【步骤4/4】启动 Nginx${NC}"
+    echo -e "\n${BLUE}[Step 4/4] Starting Nginx${NC}"
     deploy_nginx
 
-    echo -e "\n${GREEN}=============================================${NC}"
-    echo -e "${GREEN}          所有服务部署完成！                 ${NC}"
-    echo -e "${GREEN}=============================================${NC}"
+    echo -e "\n${GREEN}=== All services deployed! ===${NC}"
     
-    echo -e "\n${YELLOW}服务状态概览:${NC}"
+    echo -e "\n${YELLOW}Service status:${NC}"
     ${DOCKER_COMPOSE} ps
 }
 
-# 拉取最新代码
 pull_code() {
-    echo -e "${YELLOW}=== 拉取最新代码 ===${NC}"
+    echo -e "${YELLOW}=== Pulling latest code ===${NC}"
     git fetch origin main
     git reset --hard origin/main
-    echo -e "${GREEN}代码拉取完成！${NC}"
+    echo -e "${GREEN}Code pulled!${NC}"
 }
 
-# 主函数
 main() {
     local action="start"
     local modules=("all")
@@ -288,7 +259,7 @@ main() {
                 shift
                 ;;
             *)
-                echo -e "${RED}错误: 未知参数 '$1'${NC}"
+                echo -e "${RED}Error: Unknown parameter '$1'${NC}"
                 show_help
                 exit 1
                 ;;
@@ -310,13 +281,13 @@ main() {
             ;;
 
         down)
-            echo -e "${YELLOW}=== 停止并移除容器 ===${NC}"
+            echo -e "${YELLOW}=== Stopping containers ===${NC}"
             ${DOCKER_COMPOSE} down
-            echo -e "${GREEN}容器已停止并移除！${NC}"
+            echo -e "${GREEN}Containers stopped!${NC}"
             ;;
 
         restart)
-            echo -e "${YELLOW}=== 重启服务 ===${NC}"
+            echo -e "${YELLOW}=== Restarting services ===${NC}"
             case "${modules[0]}" in
                 all) ${DOCKER_COMPOSE} restart ;;
                 backend) ${DOCKER_COMPOSE} restart web ;;
@@ -325,11 +296,11 @@ main() {
                 nginx) ${DOCKER_COMPOSE} restart nginx ;;
                 middleware) ${DOCKER_COMPOSE} restart redis db ;;
             esac
-            echo -e "${GREEN}服务已重启！${NC}"
+            echo -e "${GREEN}Services restarted!${NC}"
             ;;
 
         build)
-            echo -e "${YELLOW}=== 构建镜像 ===${NC}"
+            echo -e "${YELLOW}=== Building images ===${NC}"
             case "${modules[0]}" in
                 all) ${DOCKER_COMPOSE} build ;;
                 backend) ${DOCKER_COMPOSE} build web ;;
@@ -338,7 +309,7 @@ main() {
                 nginx) ${DOCKER_COMPOSE} build nginx ;;
                 middleware) ${DOCKER_COMPOSE} build redis db ;;
             esac
-            echo -e "${GREEN}镜像构建完成！${NC}"
+            echo -e "${GREEN}Images built!${NC}"
             ;;
 
         update)
@@ -354,7 +325,7 @@ main() {
             ;;
 
         logs)
-            echo -e "${YELLOW}=== 查看日志 ===${NC}"
+            echo -e "${YELLOW}=== Viewing logs ===${NC}"
             case "${modules[0]}" in
                 all) ${DOCKER_COMPOSE} logs -f ;;
                 backend) ${DOCKER_COMPOSE} logs -f web ;;
@@ -366,12 +337,12 @@ main() {
             ;;
 
         clean)
-            echo -e "${YELLOW}=== 清理无用资源 ===${NC}"
+            echo -e "${YELLOW}=== Cleaning resources ===${NC}"
             docker stop $(docker ps -aq) 2>/dev/null || true
             docker rm $(docker ps -aq) 2>/dev/null || true
             docker image prune -f
             docker network prune -f
-            echo -e "${GREEN}清理完成！${NC}"
+            echo -e "${GREEN}Cleanup complete!${NC}"
             ;;
     esac
 }
