@@ -1,6 +1,10 @@
 # 使用华为云 Python 镜像（阿里云ECS环境）
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
+# 设置超时环境变量
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_CONNECT_TIMEOUT=60
+
 # 替换软件源为阿里云
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
@@ -36,12 +40,9 @@ WORKDIR $APP_HOME
 # 先复制 pyproject.toml（变化频率低）
 COPY pyproject.toml .
 
-# 安装 uv（使用固定版本，阿里云镜像源最高支持0.11.16）
+# 使用 pip 直接安装依赖（更稳定）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install "uv==0.11.16" -i https://mirrors.aliyun.com/pypi/simple/
-
-# 使用环境变量配置 uv 镜像源并安装依赖（可缓存）
-RUN UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ uv sync
+    pip install -e . -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
 
 # ============================================
 # 预下载 InsightFace 模型（在构建阶段完成）
@@ -54,7 +55,7 @@ RUN mkdir -p /root/.insightface && chmod -R 755 /root/.insightface
 COPY scripts/download_insightface_models.py /tmp/
 
 # 运行模型预下载脚本（GitHub Actions 网络可以访问 GitHub）
-RUN uv run python /tmp/download_insightface_models.py
+RUN python /tmp/download_insightface_models.py
 
 # 将当前目录加入到工作目录中
 ADD . $APP_HOME
@@ -66,5 +67,5 @@ RUN mkdir -p /home/kdx-be/logs
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD curl -f http://localhost:8000/ || exit 1
 
-# 使用 uv run 启动服务
-CMD ["sh", "-c", "uv run uwsgi --ini /home/kdx-be/uwsgi.ini"]
+# 使用 uwsgi 启动服务
+CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
