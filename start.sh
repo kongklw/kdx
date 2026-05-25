@@ -143,7 +143,7 @@ build_frontend() {
 
 deploy_backend() {
     echo -e "${YELLOW}=== Deploying backend ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-deps web
+    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps web
     wait_for_container "web"
     
     echo -e "${BLUE}Running migrations...${NC}"
@@ -157,7 +157,7 @@ deploy_backend() {
 
 deploy_kdx_ws() {
     echo -e "${YELLOW}=== Deploying FastAPI ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
+    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps kdx_ws
     wait_for_container "kdx_ws"
     echo -e "${GREEN}FastAPI deployed!${NC}"
 }
@@ -171,7 +171,7 @@ deploy_nginx() {
         build_frontend
     fi
     
-    ${DOCKER_COMPOSE} up -d --build --no-deps nginx
+    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps nginx
     wait_for_port "nginx" "80"
     echo -e "${GREEN}Nginx deployed!${NC}"
 }
@@ -302,12 +302,12 @@ main() {
         build)
             echo -e "${YELLOW}=== Building images ===${NC}"
             case "${modules[0]}" in
-                all) ${DOCKER_COMPOSE} build ;;
-                backend) ${DOCKER_COMPOSE} build web ;;
-                frontend) build_frontend; ${DOCKER_COMPOSE} build nginx ;;
-                fastapi) ${DOCKER_COMPOSE} build kdx_ws ;;
-                nginx) ${DOCKER_COMPOSE} build nginx ;;
-                middleware) ${DOCKER_COMPOSE} build redis db ;;
+                all) ${DOCKER_COMPOSE} build --no-cache ;;
+                backend) ${DOCKER_COMPOSE} build --no-cache web ;;
+                frontend) build_frontend; ${DOCKER_COMPOSE} build --no-cache nginx ;;
+                fastapi) ${DOCKER_COMPOSE} build --no-cache kdx_ws ;;
+                nginx) ${DOCKER_COMPOSE} build --no-cache nginx ;;
+                middleware) ${DOCKER_COMPOSE} build --no-cache redis db ;;
             esac
             echo -e "${GREEN}Images built!${NC}"
             ;;
