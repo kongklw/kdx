@@ -143,7 +143,8 @@ build_frontend() {
 
 deploy_backend() {
     echo -e "${YELLOW}=== Deploying backend ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps web
+    ${DOCKER_COMPOSE} build --no-cache web
+    ${DOCKER_COMPOSE} up -d --no-deps web
     wait_for_container "web"
     
     echo -e "${BLUE}Running migrations...${NC}"
@@ -157,7 +158,8 @@ deploy_backend() {
 
 deploy_kdx_ws() {
     echo -e "${YELLOW}=== Deploying FastAPI ===${NC}"
-    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps kdx_ws
+    ${DOCKER_COMPOSE} build --no-cache kdx_ws
+    ${DOCKER_COMPOSE} up -d --no-deps kdx_ws
     wait_for_container "kdx_ws"
     echo -e "${GREEN}FastAPI deployed!${NC}"
 }
@@ -171,7 +173,8 @@ deploy_nginx() {
         build_frontend
     fi
     
-    ${DOCKER_COMPOSE} up -d --build --no-cache --no-deps nginx
+    ${DOCKER_COMPOSE} build --no-cache nginx
+    ${DOCKER_COMPOSE} up -d --no-deps nginx
     wait_for_port "nginx" "80"
     echo -e "${GREEN}Nginx deployed!${NC}"
 }
