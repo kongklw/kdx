@@ -41,9 +41,12 @@ WORKDIR $APP_HOME
 # 先复制 pyproject.toml（变化频率低）
 COPY pyproject.toml .
 
-# 使用 pip 直接安装依赖（更稳定）
+# 安装 uv（使用固定版本）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install -e . -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
+    pip install "uv==0.11.16" -i https://mirrors.aliyun.com/pypi/simple/
+
+# 使用 uv sync 安装依赖
+RUN UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ uv sync
 
 # ============================================
 # 复制本地 InsightFace 模型（无需网络下载）
