@@ -75,5 +75,5 @@ RUN mkdir -p /home/kdx-be/logs
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD curl -f http://localhost:8000/ || exit 1
 
-# 使用 uwsgi 启动服务
-CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
+# 使用 uv run 启动 uwsgi 服务
+CMD ["uv", "run", "uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
