@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置 python 环境变量
@@ -45,17 +46,21 @@ RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
     pip install -e . -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
 
 # ============================================
-# 预下载 InsightFace 模型（在构建阶段完成）
+# 复制本地 InsightFace 模型（无需网络下载）
 # ============================================
 
-# 创建 InsightFace 模型目录并设置权限
-RUN mkdir -p /root/.insightface && chmod -R 755 /root/.insightface
+# 创建 InsightFace 模型目录
+RUN mkdir -p /root/.insightface/models
 
-# 复制模型下载脚本
-COPY scripts/download_insightface_models.py /tmp/
 
-# 运行模型预下载脚本（GitHub Actions 网络可以访问 GitHub）
-RUN python /tmp/download_insightface_models.py
+RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
+    rm /tmp/buffalo_l.zip
+
+# 或者如果模型已经解压好了，直接复制目录
+# COPY models/buffalo_l /root/.insightface/models/buffalo_l
+
+# 设置权限
+RUN chmod -R 755 /root/.insightface
 
 # 将当前目录加入到工作目录中
 ADD . $APP_HOME
