@@ -12,8 +12,8 @@ import shutil
 
 # 备用下载地址列表
 MODEL_URLS = [
-    "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
-    "https://gitee.com/mirrors/insightface/attach_files/1163543/download/buffalo_l.zip",
+    # "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
+    # "https://gitee.com/mirrors/insightface/attach_files/1163543/download/buffalo_l.zip",
     "https://codeload.github.com/deepinsight/insightface/zip/refs/tags/v0.7",
 ]
 
