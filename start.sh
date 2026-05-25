@@ -38,16 +38,16 @@ is_service_running() {
 wait_for_container() {
     local container_name=$1
     local timeout=${2:-$MAX_WAIT}
-    
+
     echo -e "${BLUE}Waiting for $container_name...${NC}"
-    
+
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
         local container_id=$(${DOCKER_COMPOSE} ps -q "$container_name" 2>/dev/null)
         if [ -z "$container_id" ]; then
             container_id=$(docker ps -q --filter "name=^/${container_name}$" 2>/dev/null)
         fi
-        
+
         if [ -n "$container_id" ]; then
             local status=$(docker inspect --format='{{.State.Status}}' "$container_id" 2>/dev/null)
             if [ "$status" = "running" ]; then
@@ -59,7 +59,7 @@ wait_for_container() {
         elapsed=$((elapsed + CHECK_INTERVAL))
         echo -ne "${YELLOW}.${NC}"
     done
-    
+
     echo -e "\n${RED}Error: $container_name timeout${NC}"
     ${DOCKER_COMPOSE} logs "$container_name" 2>/dev/null | tail -20 || docker logs "$container_name" 2>/dev/null | tail -20
     return 1
@@ -70,9 +70,9 @@ wait_for_port() {
     local port=$2
     local host=${3:-localhost}
     local timeout=${4:-$MAX_WAIT}
-    
+
     echo -e "${BLUE}Waiting for $service on port $port...${NC}"
-    
+
     local elapsed=0
     while [ $elapsed -lt $timeout ]; do
         if is_service_running "$service"; then
@@ -85,7 +85,7 @@ wait_for_port() {
         elapsed=$((elapsed + CHECK_INTERVAL))
         echo -ne "${YELLOW}.${NC}"
     done
-    
+
     echo -e "\n${RED}Error: $service timeout${NC}"
     ${DOCKER_COMPOSE} logs "$service" | tail -20
     return 1
@@ -143,15 +143,30 @@ build_frontend() {
 
 deploy_backend() {
     echo -e "${YELLOW}=== Deploying backend ===${NC}"
+
+    # 检查并复制 InsightFace 模型文件
+    local model_file="buffalo_l.zip"
+    local model_src="/tmp/${model_file}"
+    local model_dst="${PROJECT_PATH}/kdx-be/${model_file}"
+
+    if [ -f "${model_src}" ] && [ ! -f "${model_dst}" ]; then
+        echo -e "${BLUE}复制模型文件: ${model_src} -> ${model_dst}${NC}"
+        cp "${model_src}" "${model_dst}"
+    elif [ ! -f "${model_src}" ] && [ ! -f "${model_dst}" ]; then
+        echo -e "${RED}错误: 未找到模型文件 ${model_file}${NC}"
+        echo -e "${YELLOW}请将 ${model_file} 放在 /tmp 或 kdx-be/ 目录下${NC}"
+        exit 1
+    fi
+
     ${DOCKER_COMPOSE} up -d --build --no-deps web
     wait_for_container "web"
-    
+
     echo -e "${BLUE}Running migrations...${NC}"
-    ${DOCKER_COMPOSE} exec -T web python manage.py migrate --noinput
-    
+    ${DOCKER_COMPOSE} exec -T web uv run python manage.py migrate --noinput
+
     echo -e "${BLUE}Collecting static files...${NC}"
-    ${DOCKER_COMPOSE} exec -T web python manage.py collectstatic --noinput
-    
+    ${DOCKER_COMPOSE} exec -T web uv run python manage.py collectstatic --noinput
+
     echo -e "${GREEN}Backend deployed!${NC}"
 }
 
@@ -164,13 +179,13 @@ deploy_kdx_ws() {
 
 deploy_nginx() {
     echo -e "${YELLOW}=== Deploying Nginx ===${NC}"
-    
+
     if [ ! -d "${PROJECT_PATH}/kdx-fe/dist" ]; then
         echo -e "${RED}Warning: dist not found!${NC}"
         echo -e "${YELLOW}Building frontend...${NC}"
         build_frontend
     fi
-    
+
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
     wait_for_port "nginx" "80"
     echo -e "${GREEN}Nginx deployed!${NC}"
@@ -178,13 +193,13 @@ deploy_nginx() {
 
 deploy_middleware() {
     echo -e "${YELLOW}=== Deploying middleware ===${NC}"
-    
+
     ${DOCKER_COMPOSE} up -d --no-deps redis
     wait_for_port "redis" "6379"
-    
+
     ${DOCKER_COMPOSE} up -d --no-deps db
     wait_for_port "db" "3306"
-    
+
     echo -e "${GREEN}Middleware deployed!${NC}"
 }
 
@@ -204,7 +219,7 @@ deploy_all() {
     deploy_nginx
 
     echo -e "\n${GREEN}=== All services deployed! ===${NC}"
-    
+
     echo -e "\n${YELLOW}Service status:${NC}"
     ${DOCKER_COMPOSE} ps
 }
