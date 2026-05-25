@@ -52,7 +52,10 @@ RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
 # 创建 InsightFace 模型目录
 RUN mkdir -p /root/.insightface/models
 
+# 复制本地模型压缩包到容器
+COPY buffalo_l.zip /tmp/
 
+# 解压模型并清理压缩包
 RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
     rm /tmp/buffalo_l.zip
 
