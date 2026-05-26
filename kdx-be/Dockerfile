@@ -33,43 +33,27 @@ ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
 ENV OMP_NUM_THREADS=1
 ENV OPENCV_DNN_USE_OPENCL=0
 
-# 容器内创建 myproject 文件夹
+# 设置工作目录
 ENV APP_HOME=/home/kdx-be
 RUN mkdir -p $APP_HOME
 WORKDIR $APP_HOME
 
-# 先复制 pyproject.toml（变化频率低）
-COPY pyproject.toml .
+# 先复制 requirements.txt（利用 Docker 缓存）
+COPY requirements.txt .
 
-# 安装 uv（使用固定版本）
+# 使用 pip 安装依赖
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install "uv==0.11.16" -i https://mirrors.aliyun.com/pypi/simple/
+    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
 
-# 使用 uv sync 安装依赖
-RUN UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ uv sync
-
-# ============================================
 # 复制本地 InsightFace 模型（无需网络下载）
-# ============================================
-
-# 创建 InsightFace 模型目录
 RUN mkdir -p /root/.insightface/models
-
-# 复制本地模型压缩包到容器
 COPY buffalo_l.zip /tmp/
-
-# 解压模型并清理压缩包
 RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
     rm /tmp/buffalo_l.zip
-
-# 或者如果模型已经解压好了，直接复制目录
-# COPY models/buffalo_l /root/.insightface/models/buffalo_l
-
-# 设置权限
 RUN chmod -R 755 /root/.insightface
 
-# 将当前目录加入到工作目录中
-ADD . $APP_HOME
+# 复制项目代码
+COPY . .
 
 # 创建日志目录
 RUN mkdir -p /home/kdx-be/logs
@@ -78,5 +62,5 @@ RUN mkdir -p /home/kdx-be/logs
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD curl -f http://localhost:8000/ || exit 1
 
-# 使用 uv run 启动 uwsgi 服务
-CMD ["uv", "run", "uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
+# 启动 uwsgi 服务
+CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]
