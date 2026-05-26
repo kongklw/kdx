@@ -46,9 +46,6 @@ services:
       - "8000"
     volumes:
       - media_vol:/home/kdx-be/media
-      - ./compose/uwsgi:/tmp
-      - ./kdx-be/kdemo:/home/kdx-be/kdemo
-      - ./kdx-be/manage.py:/home/kdx-be/manage.py
     networks:
       - nginx_network
       - db_network
