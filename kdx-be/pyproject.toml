@@ -25,6 +25,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pillow>=12.2.0",
     "requests>=2.34.2",
+    "uwsgi>=2.0.30",
 ]
 
 [build-system]

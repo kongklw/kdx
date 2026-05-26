@@ -91,6 +91,12 @@ wait_for_port() {
     return 1
 }
 
+cleanup_docker() {
+    echo -e "${BLUE}Cleaning up dangling images...${NC}"
+    docker image prune -f 2>/dev/null || true
+    echo -e "${GREEN}Cleanup complete!${NC}"
+}
+
 show_help() {
     echo -e "${BLUE}=== KDX Deployment Script ===${NC}"
     echo ""
@@ -167,6 +173,8 @@ deploy_backend() {
     echo -e "${BLUE}Collecting static files...${NC}"
     ${DOCKER_COMPOSE} exec -T web uv run python manage.py collectstatic --noinput
 
+    cleanup_docker
+
     echo -e "${GREEN}Backend deployed!${NC}"
 }
 
@@ -174,6 +182,9 @@ deploy_kdx_ws() {
     echo -e "${YELLOW}=== Deploying FastAPI ===${NC}"
     ${DOCKER_COMPOSE} up -d --build --no-deps kdx_ws
     wait_for_container "kdx_ws"
+
+    cleanup_docker
+
     echo -e "${GREEN}FastAPI deployed!${NC}"
 }
 
@@ -188,6 +199,9 @@ deploy_nginx() {
 
     ${DOCKER_COMPOSE} up -d --build --no-deps nginx
     wait_for_port "nginx" "80"
+
+    cleanup_docker
+
     echo -e "${GREEN}Nginx deployed!${NC}"
 }
 
@@ -324,6 +338,7 @@ main() {
                 nginx) ${DOCKER_COMPOSE} build nginx ;;
                 middleware) ${DOCKER_COMPOSE} build redis db ;;
             esac
+            cleanup_docker
             echo -e "${GREEN}Images built!${NC}"
             ;;
 
@@ -355,7 +370,8 @@ main() {
             echo -e "${YELLOW}=== Cleaning resources ===${NC}"
             docker stop $(docker ps -aq) 2>/dev/null || true
             docker rm $(docker ps -aq) 2>/dev/null || true
-            docker image prune -f
+            docker image prune -af
+            docker volume prune -f
             docker network prune -f
             echo -e "${GREEN}Cleanup complete!${NC}"
             ;;
