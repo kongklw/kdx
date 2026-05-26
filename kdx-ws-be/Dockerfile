@@ -1,13 +1,14 @@
 # 使用 Python 3.12 基础镜像
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
-RUN echo "Hello, Docker!"
 # 配置阿里云镜像源
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_CONNECT_TIMEOUT=60
 
 # 禁用 ONNX Runtime CPU 优化（兼容更多 CPU 型号）
 ENV ORT_DISABLE_CPU_OPTIMIZATION 1
@@ -17,13 +18,11 @@ ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
 WORKDIR /app
 
 # 复制项目配置文件
-COPY ./pyproject.toml /app/pyproject.toml
+COPY ./requirements.txt /app/requirements.txt
 
-# 安装依赖（使用 uv）
+# 安装依赖（使用 pip）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install uv -i https://mirrors.aliyun.com/pypi/simple/ && \
-    uv config set registry.index-url https://mirrors.aliyun.com/pypi/simple/ && \
-    uv sync
+    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
 
 # 复制应用代码和脚本
 COPY ./app /app/app
