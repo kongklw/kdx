@@ -18,21 +18,24 @@ ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
 WORKDIR /app
 
 # 复制项目配置文件
-COPY ./requirements.txt /app/requirements.txt
+COPY ./kdx-ws-be/requirements.txt /app/requirements.txt
 
 # 安装依赖（使用 pip）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
     pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
 
 # 复制应用代码和脚本
-COPY ./app /app/app
-COPY ./scripts /app/scripts
+COPY ./kdx-ws-be/app /app/app
+COPY ./kdx-ws-be/scripts /app/scripts
 
-# 创建 InsightFace 模型目录并设置权限
-RUN mkdir -p /root/.insightface && chmod -R 755 /root/.insightface
+# 创建 InsightFace 模型目录
+RUN mkdir -p /root/.insightface/models
 
-# 在构建阶段预下载 InsightFace 模型
-RUN python /app/scripts/download_insightface_models.py
+# 从 kdx-be 目录复制本地模型（与 kdx-be 保持一致）
+COPY ./kdx-be/buffalo_l.zip /tmp/buffalo_l.zip
+RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
+    rm /tmp/buffalo_l.zip && \
+    chmod -R 755 /root/.insightface
 
 # 暴露端口
 EXPOSE 8002
