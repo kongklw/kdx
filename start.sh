@@ -168,10 +168,10 @@ deploy_backend() {
     wait_for_container "web"
 
     echo -e "${BLUE}Running migrations...${NC}"
-    ${DOCKER_COMPOSE} exec -T web uv run python manage.py migrate --noinput
+    ${DOCKER_COMPOSE} exec -T web python manage.py migrate --noinput
 
     echo -e "${BLUE}Collecting static files...${NC}"
-    ${DOCKER_COMPOSE} exec -T web uv run python manage.py collectstatic --noinput
+    ${DOCKER_COMPOSE} exec -T web python manage.py collectstatic --noinput
 
     cleanup_docker
 
