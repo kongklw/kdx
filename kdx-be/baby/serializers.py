@@ -86,6 +86,7 @@ class GrowingBlogSerializer(serializers.ModelSerializer):
 
 class BabyInfoSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
+    image = serializers.SerializerMethodField()
     image_full = serializers.SerializerMethodField()
     image_thumb = serializers.SerializerMethodField()
 
@@ -98,6 +99,14 @@ class BabyInfoSerializer(serializers.ModelSerializer):
         if obj.birthday:
             return '育儿中' if obj.birthday <= date.today() else '待产中'
         return '备孕中'
+
+    def get_image(self, obj):
+        if not getattr(obj, 'image', None):
+            return ''
+        key = getattr(obj.image, 'name', None) or ''
+        if not key:
+            return ''
+        return f'/file/r?key={quote(key)}'
 
     def get_image_full(self, obj):
         request = self.context.get('request') if isinstance(self.context, dict) else None
