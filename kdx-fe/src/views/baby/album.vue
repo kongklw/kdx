@@ -191,7 +191,11 @@ export default {
           }
 
           const { asset_id: assetId, upload_url: uploadUrl, headers } = initRes.data
-          await axios.put(uploadUrl, file, {
+          // 根据当前页面协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+          const fixedUploadUrl = window.location.protocol === 'https:'
+            ? uploadUrl.replace('http://', 'https://')
+            : uploadUrl.replace('https://', 'http://')
+          await axios.put(fixedUploadUrl, file, {
             headers: {
               ...(headers || {}),
               'Content-Type': file.type

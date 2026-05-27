@@ -241,6 +241,9 @@ class PresignGetUrlView(APIView):
             Params={'Bucket': asset.bucket, 'Key': asset.object_key},
             ExpiresIn=int(request.query_params.get('expires_in', 600) or 600),
         )
+        # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+        if request.is_secure():
+            url = url.replace('http://', 'https://')
 
         return Response({'code': 200, 'msg': 'ok', 'data': {'url': url}})
 
@@ -277,6 +280,9 @@ class FileRedirectView(APIView):
                     Params={'Bucket': bucket, 'Key': key},
                     ExpiresIn=expires_in,
                 )
+                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+                if request.is_secure():
+                    url = url.replace('http://', 'https://')
                 return redirect(url)
             except Exception:
                 src = (request.query_params.get('src') or '').strip()
@@ -309,6 +315,9 @@ class FileRedirectView(APIView):
                                     Params={'Bucket': bucket, 'Key': key},
                                     ExpiresIn=expires_in,
                                 )
+                                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+                                if request.is_secure():
+                                    url = url.replace('http://', 'https://')
                                 return redirect(url)
                             except Exception:
                                 pass
@@ -378,6 +387,9 @@ class ImageBestRedirectView(APIView):
                     Params={'Bucket': bucket, 'Key': key},
                     ExpiresIn=expires_in,
                 )
+                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+                if request.is_secure():
+                    url = url.replace('http://', 'https://')
                 return redirect(url)
 
             if src:
@@ -436,6 +448,9 @@ class ImageBestRedirectView(APIView):
                             Params={'Bucket': bucket, 'Key': key},
                             ExpiresIn=expires_in,
                         )
+                        # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
+                        if request.is_secure():
+                            url = url.replace('http://', 'https://')
                         return redirect(url)
                 finally:
                     try:
