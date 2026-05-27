@@ -45,6 +45,7 @@ services:
     expose:
       - "8000"
     volumes:
+      - ./kdx-be:/home/kdx-be
       - media_vol:/home/kdx-be/media
     networks:
       - nginx_network
