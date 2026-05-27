@@ -612,12 +612,7 @@ export default {
               throw new Error('获取上传地址失败')
             }
 
-            // 根据当前页面协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-            const fixedUploadUrl = window.location.protocol === 'https:'
-              ? uploadUrl.replace('http://', 'https://')
-              : uploadUrl.replace('https://', 'http://')
-
-            await axios.put(fixedUploadUrl, file, {
+            await axios.put(uploadUrl, file, {
               headers: {
                 ...(headers || {}),
                 'Content-Type': file.type

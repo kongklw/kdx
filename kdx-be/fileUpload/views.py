@@ -164,6 +164,10 @@ class PresignInitView(APIView):
             ExpiresIn=int(payload.get('expires_in', 600) or 600),
         )
 
+        # 将绝对 URL 转换为相对路径，通过 Nginx /minio/ 代理访问
+        if endpoint and upload_url.startswith(endpoint):
+            upload_url = upload_url.replace(endpoint, '/minio/')
+
         return Response({
             'code': 200,
             'msg': 'ok',
