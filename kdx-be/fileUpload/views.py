@@ -72,6 +72,16 @@ def _get_s3_client():
     )
 
 
+def _minio_url_to_proxy(url: str) -> str:
+    """将 MinIO 绝对 URL 转换为通过 Nginx /minio/ 代理的路径"""
+    if not url:
+        return url
+    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+    if endpoint and url.startswith(endpoint):
+        return url.replace(endpoint, '/minio/')
+    return url
+
+
 def _make_object_key(purpose: str, filename: str) -> str:
     safe_purpose = purpose.strip().lower()
     ext = Path(filename or '').suffix
@@ -245,9 +255,8 @@ class PresignGetUrlView(APIView):
             Params={'Bucket': asset.bucket, 'Key': asset.object_key},
             ExpiresIn=int(request.query_params.get('expires_in', 600) or 600),
         )
-        # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-        if request.is_secure():
-            url = url.replace('http://', 'https://')
+        # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+        url = _minio_url_to_proxy(url)
 
         return Response({'code': 200, 'msg': 'ok', 'data': {'url': url}})
 
@@ -284,9 +293,8 @@ class FileRedirectView(APIView):
                     Params={'Bucket': bucket, 'Key': key},
                     ExpiresIn=expires_in,
                 )
-                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-                if request.is_secure():
-                    url = url.replace('http://', 'https://')
+                # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                url = _minio_url_to_proxy(url)
                 return redirect(url)
             except Exception:
                 src = (request.query_params.get('src') or '').strip()
@@ -319,9 +327,8 @@ class FileRedirectView(APIView):
                                     Params={'Bucket': bucket, 'Key': key},
                                     ExpiresIn=expires_in,
                                 )
-                                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-                                if request.is_secure():
-                                    url = url.replace('http://', 'https://')
+                                # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                                url = _minio_url_to_proxy(url)
                                 return redirect(url)
                             except Exception:
                                 pass
@@ -391,9 +398,8 @@ class ImageBestRedirectView(APIView):
                     Params={'Bucket': bucket, 'Key': key},
                     ExpiresIn=expires_in,
                 )
-                # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-                if request.is_secure():
-                    url = url.replace('http://', 'https://')
+                # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                url = _minio_url_to_proxy(url)
                 return redirect(url)
 
             if src:
@@ -452,9 +458,8 @@ class ImageBestRedirectView(APIView):
                             Params={'Bucket': bucket, 'Key': key},
                             ExpiresIn=expires_in,
                         )
-                        # 根据请求协议动态调整 MinIO URL 协议（兼容 HTTP 和 HTTPS）
-                        if request.is_secure():
-                            url = url.replace('http://', 'https://')
+                        # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                        url = _minio_url_to_proxy(url)
                         return redirect(url)
                 finally:
                     try:

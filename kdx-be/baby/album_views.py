@@ -621,6 +621,7 @@ class AlbumVideoPlaybackInfoView(APIView):
         mp4_url = ''
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket and key:
                 s3 = _get_s3_client()
                 try:
@@ -629,6 +630,9 @@ class AlbumVideoPlaybackInfoView(APIView):
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
+                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                    if endpoint and mp4_url.startswith(endpoint):
+                        mp4_url = mp4_url.replace(endpoint, '/minio/')
                 except Exception:
                     mp4_url = ''
         else:
@@ -696,6 +700,10 @@ class AlbumVideoHlsView(APIView):
                 Params={'Bucket': bucket, 'Key': key},
                 ExpiresIn=600,
             )
+            # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+            if endpoint and url.startswith(endpoint):
+                url = url.replace(endpoint, '/minio/')
             return redirect(url)
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)
@@ -752,6 +760,10 @@ class AlbumVideoDashView(APIView):
                 Params={'Bucket': bucket, 'Key': key},
                 ExpiresIn=600,
             )
+            # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+            if endpoint and url.startswith(endpoint):
+                url = url.replace(endpoint, '/minio/')
             return redirect(url)
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)

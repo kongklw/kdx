@@ -109,14 +109,19 @@ class BabyInfoSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
-                    return s3.generate_presigned_url(
+                    url = s3.generate_presigned_url(
                         ClientMethod='get_object',
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
+                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                    if endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio/')
+                    return url
                 except Exception:
                     pass
 
@@ -228,6 +233,7 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
@@ -236,6 +242,9 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
+                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                    if endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio/')
                     return url
                 except Exception:
                     pass
@@ -327,14 +336,19 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
-                    return s3.generate_presigned_url(
+                    url = s3.generate_presigned_url(
                         ClientMethod='get_object',
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
+                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
+                    if endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio/')
+                    return url
                 except Exception:
                     pass
 
