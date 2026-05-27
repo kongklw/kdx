@@ -4,9 +4,16 @@ FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 # 配置阿里云镜像源
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-# 安装系统依赖
+# 安装系统依赖（OpenCV 需要）
 RUN apt-get update && apt-get install -y \
     unzip \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libx11-6 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # 设置环境变量
