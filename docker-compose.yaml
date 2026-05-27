@@ -89,7 +89,7 @@ services:
       - ./compose/nginx/ssl:/usr/share/nginx/ssl
       - ./compose/nginx/log:/var/log/nginx
       - ./kdx-fe/dist:/usr/share/nginx/html:ro
-      - media_vol:/usr/share/nginx/html/media
+      - media_vol:/usr/share/nginx/media
     networks:
       - nginx_network
     restart: always
