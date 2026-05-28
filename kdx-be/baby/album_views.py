@@ -631,8 +631,13 @@ class AlbumVideoPlaybackInfoView(APIView):
                         ExpiresIn=600,
                     )
                     # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if endpoint and mp4_url.startswith(endpoint):
-                        mp4_url = mp4_url.replace(endpoint, '/minio/')
+                    if 'minio:9000' in mp4_url:
+                        mp4_url = mp4_url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
+                    elif endpoint and mp4_url.startswith(endpoint):
+                        mp4_url = mp4_url.replace(endpoint, '/minio')
+                    # 确保没有双斜杠
+                    while '//' in mp4_url:
+                        mp4_url = mp4_url.replace('//', '/')
                 except Exception:
                     mp4_url = ''
         else:

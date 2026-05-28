@@ -76,9 +76,16 @@ def _minio_url_to_proxy(url: str) -> str:
     """将 MinIO 绝对 URL 转换为通过 Nginx /minio/ 代理的路径"""
     if not url:
         return url
-    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-    if endpoint and url.startswith(endpoint):
-        return url.replace(endpoint, '/minio/')
+    # 先检查是否是内部地址
+    if 'minio:9000' in url:
+        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
+    else:
+        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+        if endpoint and url.startswith(endpoint):
+            url = url.replace(endpoint, '/minio')
+    # 确保没有双斜杠
+    while '//' in url:
+        url = url.replace('//', '/')
     return url
 
 

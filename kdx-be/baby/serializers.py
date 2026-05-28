@@ -128,8 +128,13 @@ class BabyInfoSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio/')
+                    if 'minio:9000' in url:
+                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
+                    elif endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio')
+                    # 确保没有双斜杠
+                    while '//' in url:
+                        url = url.replace('//', '/')
                     return url
                 except Exception:
                     pass
@@ -252,8 +257,13 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio/')
+                    if 'minio:9000' in url:
+                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
+                    elif endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio')
+                    # 确保没有双斜杠
+                    while '//' in url:
+                        url = url.replace('//', '/')
                     return url
                 except Exception:
                     pass
@@ -355,8 +365,13 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio/')
+                    if 'minio:9000' in url:
+                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
+                    elif endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, '/minio')
+                    # 确保没有双斜杠
+                    while '//' in url:
+                        url = url.replace('//', '/')
                     return url
                 except Exception:
                     pass
