@@ -11,7 +11,7 @@
           round
           width="80"
           height="80"
-          :src="resolveApiUrl(babyInfo.image_full || babyInfo.image) || defaultAvatar"
+          :src="babyInfo.image_full || babyInfo.image || defaultAvatar"
           fit="cover"
           class="avatar"
         />
@@ -81,7 +81,7 @@
                         width="100%"
                         height="200"
                         fit="cover"
-                        :src="resolveApiUrl(item.photos[0].poster) || videoCoverPlaceholder"
+                        :src="item.photos[0].poster || videoCoverPlaceholder"
                         radius="8"
                       />
                       <van-icon name="play-circle-o" size="50" color="rgba(255,255,255,0.8)" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none;" />
@@ -91,7 +91,7 @@
                       width="100%"
                       height="200"
                       fit="cover"
-                      :src="resolveApiUrl(item.photos[0].thumb || item.photos[0].image)"
+                      :src="item.photos[0].thumb || item.photos[0].image"
                       radius="8"
                       @click="previewImage(item.photos[0].image, item.photos)"
                     />
@@ -104,7 +104,7 @@
                           width="100%"
                           height="100%"
                           fit="cover"
-                          :src="resolveApiUrl(photo.poster) || videoCoverPlaceholder"
+                          :src="photo.poster || videoCoverPlaceholder"
                           radius="4"
                         />
                         <van-icon name="play-circle-o" size="30" color="rgba(255,255,255,0.8)" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none;" />
@@ -114,7 +114,7 @@
                         width="100%"
                         height="100%"
                         fit="cover"
-                        :src="resolveApiUrl(photo.thumb || photo.image)"
+                        :src="photo.thumb || photo.image"
                         radius="4"
                         @click="previewImage(photo.image, item.photos)"
                       />
@@ -272,7 +272,7 @@
       <video
         v-if="currentVideo"
         ref="videoPlayer"
-        :poster="resolveApiUrl(currentVideo.poster) || videoCoverPlaceholder"
+        :poster="currentVideo.poster || videoCoverPlaceholder"
         controls
         style="width: 100%; max-height: 100%;"
         autoplay
@@ -681,7 +681,7 @@ export default {
       this.cleanupVideoPlayer()
 
       const hlsUrl = this.resolveApiUrl(photo.hls)
-      const mp4Url = this.resolveApiUrl(photo.image)
+      const mp4Url = photo.image
 
       if (hlsUrl && video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = hlsUrl
@@ -744,10 +744,10 @@ export default {
       })
     },
     previewImage(current, photos) {
-      const images = (photos || []).map(p => this.resolveApiUrl((p && p.image) || '')).filter(Boolean)
+      const images = (photos || []).map(p => (p && p.image) || '').filter(Boolean)
       ImagePreview({
         images,
-        startPosition: images.indexOf(this.resolveApiUrl(current))
+        startPosition: images.indexOf(current)
       })
     },
     onSelectAction(action, id) {

@@ -1,8 +1,6 @@
 from rest_framework import serializers
 from datetime import date
 from django.conf import settings
-import boto3
-from botocore.config import Config
 import re
 from urllib.parse import quote
 from fileUpload.models import File
@@ -10,6 +8,9 @@ from .models import (BabyInfo, FeedMilk, SleepLog, BabyDiapers,
                      BabyExpense, Temperature, TodoList, PantsBrandModel, GrowingBlogModel,
                      BabyAlbum, AlbumPhoto, DailyHabit, GrowthRecord, MenstrualSetting, MenstrualLog, BirthdayRecord
                      )
+import boto3
+from botocore.client import Config
+
 
 def _absolute_url(request, url: str) -> str:
     if not url:
@@ -109,7 +110,7 @@ class BabyInfoSerializer(serializers.ModelSerializer):
         return f'/file/r?key={quote(key)}'
 
     def get_image_full(self, obj):
-        request = self.context.get('request') if isinstance(self.context, dict) else None
+        """生成预签名 URL"""
         if not getattr(obj, 'image', None):
             return ''
         key = getattr(obj.image, 'name', None) or ''
@@ -118,7 +119,6 @@ class BabyInfoSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
@@ -127,33 +127,22 @@ class BabyInfoSerializer(serializers.ModelSerializer):
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if 'minio:9000' in url:
-                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
-                    elif endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio')
-                    # 确保没有双斜杠
-                    while '//' in url:
-                        url = url.replace('//', '/')
+                    # 将内部地址转换为外部地址
+                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+                    if public_endpoint:
+                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                        if endpoint and url.startswith(endpoint):
+                            url = url.replace(endpoint, public_endpoint)
                     return url
-                except Exception:
+                except Exception as e:
                     pass
-
-            media_url = getattr(settings, 'MEDIA_URL', '/media/')
-            if not media_url.endswith('/'):
-                media_url = f'{media_url}/'
-            return _absolute_url(request, f'{media_url}{key.lstrip("/")}')
-
-        try:
-            return _absolute_url(request, obj.image.url)
-        except Exception:
-            return ''
+        return key.lstrip('/') if key else ''
 
     def get_image_thumb(self, obj):
-        request = self.context.get('request') if isinstance(self.context, dict) else None
+        """只返回缩略图的相对路径（key），前端负责拼接完整地址"""
         if not obj or not getattr(obj, 'id', None) or not getattr(obj, 'image', None):
             return ''
-        return _absolute_url(request, f'/file/img?base={quote(f"baby/thumbs/bi_{obj.id}_w200")}')
+        return f'baby/thumbs/bi_{obj.id}_w200'
 
 
 class MenstrualSettingSerializer(serializers.ModelSerializer):
@@ -220,6 +209,7 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
     def get_image_url_full(self, obj):
+        """生成预签名 URL"""
         raw = str(getattr(obj, 'image_url', None) or '').strip()
         if not raw:
             return ''
@@ -230,7 +220,6 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
                 return raw
             raw = raw.split('/media/', 1)[1]
 
-        request = self.context.get('request') if isinstance(self.context, dict) else None
         key = raw.replace('\\', '/')
         if '/media/' in key:
             key = key.split('/media/', 1)[1]
@@ -247,7 +236,6 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
@@ -256,22 +244,17 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if 'minio:9000' in url:
-                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
-                    elif endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio')
-                    # 确保没有双斜杠
-                    while '//' in url:
-                        url = url.replace('//', '/')
+                    # 将内部地址转换为外部地址
+                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+                    if public_endpoint:
+                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                        if endpoint and url.startswith(endpoint):
+                            url = url.replace(endpoint, public_endpoint)
                     return url
                 except Exception:
                     pass
 
-        media_url = getattr(settings, 'MEDIA_URL', '/media/')
-        if not media_url.endswith('/'):
-            media_url = f'{media_url}/'
-        return _absolute_url(request, f'{media_url}{key.lstrip("/")}')
+        return f'/file/r?key={quote(key)}'
 
 def _calc_age_str(birthday, target_date):
     if not birthday or not target_date:
@@ -346,7 +329,7 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
         return _calc_age_str(baby_info.birthday, obj.measure_date)
 
     def get_photo_full(self, obj):
-        request = self.context.get('request') if isinstance(self.context, dict) else None
+        """生成预签名 URL"""
         if not getattr(obj, 'photo', None):
             return ''
         key = getattr(obj.photo, 'name', None) or ''
@@ -355,7 +338,6 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
 
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
             if bucket:
                 s3 = _get_s3_client()
                 try:
@@ -364,27 +346,17 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if 'minio:9000' in url:
-                        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
-                    elif endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, '/minio')
-                    # 确保没有双斜杠
-                    while '//' in url:
-                        url = url.replace('//', '/')
+                    # 将内部地址转换为外部地址
+                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+                    if public_endpoint:
+                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                        if endpoint and url.startswith(endpoint):
+                            url = url.replace(endpoint, public_endpoint)
                     return url
                 except Exception:
                     pass
 
-            media_url = getattr(settings, 'MEDIA_URL', '/media/')
-            if not media_url.endswith('/'):
-                media_url = f'{media_url}/'
-            return _absolute_url(request, f'{media_url}{key.lstrip("/")}')
-
-        try:
-            return _absolute_url(request, obj.photo.url)
-        except Exception:
-            return ''
+        return f'/file/r?key={quote(key)}'
 
     def get_photo_thumb(self, obj):
         request = self.context.get('request') if isinstance(self.context, dict) else None

@@ -23,6 +23,7 @@ class BabyInfoView(APIView):
             if not queryset:
                 return Response({"code": 200, "data": None, "msg": "No baby info found"})
             serializer = BabyInfoSerializer(queryset, context={'request': request})
+            print(serializer.data)
             response = {"code": 200, "data": serializer.data, "msg": "success"}
             return Response(response)
         except Exception as e:

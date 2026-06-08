@@ -617,34 +617,9 @@ class AlbumVideoPlaybackInfoView(APIView):
         if not photo:
             return Response({'code': 404, 'msg': 'Not found', 'data': None}, status=404)
 
+        # 只返回 MinIO 中的相对路径（key），前端负责拼接完整地址
         key = getattr(getattr(photo, 'image', None), 'name', None) or ''
-        mp4_url = ''
-        if getattr(settings, 'USE_S3_MEDIA', False):
-            bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-            if bucket and key:
-                s3 = _get_s3_client()
-                try:
-                    mp4_url = s3.generate_presigned_url(
-                        ClientMethod='get_object',
-                        Params={'Bucket': bucket, 'Key': key},
-                        ExpiresIn=600,
-                    )
-                    # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                    if 'minio:9000' in mp4_url:
-                        mp4_url = mp4_url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
-                    elif endpoint and mp4_url.startswith(endpoint):
-                        mp4_url = mp4_url.replace(endpoint, '/minio')
-                    # 确保没有双斜杠
-                    while '//' in mp4_url:
-                        mp4_url = mp4_url.replace('//', '/')
-                except Exception:
-                    mp4_url = ''
-        else:
-            try:
-                mp4_url = request.build_absolute_uri(photo.image.url)
-            except Exception:
-                mp4_url = ''
+        mp4_url = key.lstrip('/') if key else ''
 
         hls_url = request.build_absolute_uri(f'/baby/albums/video/{stream_id}/hls/master.m3u8')
         dash_url = request.build_absolute_uri(f'/baby/albums/video/{stream_id}/dash/manifest.mpd')
@@ -705,10 +680,12 @@ class AlbumVideoHlsView(APIView):
                 Params={'Bucket': bucket, 'Key': key},
                 ExpiresIn=600,
             )
-            # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-            if endpoint and url.startswith(endpoint):
-                url = url.replace(endpoint, '/minio/')
+            # 将内部地址转换为外部地址
+            public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+            if public_endpoint:
+                endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                if endpoint and url.startswith(endpoint):
+                    url = url.replace(endpoint, public_endpoint)
             return redirect(url)
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)
@@ -765,10 +742,12 @@ class AlbumVideoDashView(APIView):
                 Params={'Bucket': bucket, 'Key': key},
                 ExpiresIn=600,
             )
-            # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-            endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-            if endpoint and url.startswith(endpoint):
-                url = url.replace(endpoint, '/minio/')
+            # 将内部地址转换为外部地址
+            public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+            if public_endpoint:
+                endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                if endpoint and url.startswith(endpoint):
+                    url = url.replace(endpoint, public_endpoint)
             return redirect(url)
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)

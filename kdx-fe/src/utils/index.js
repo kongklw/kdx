@@ -355,3 +355,16 @@ export function removeClass(ele, cls) {
     ele.className = ele.className.replace(reg, ' ')
   }
 }
+
+/**
+ * 获取 MinIO 完整访问路径
+ * @param {string} path - MinIO 中的相对路径（如 baby/IMG_xxx.jpg）
+ * @returns {string} - 完整的访问路径
+ */
+export function getMinioUrl(path) {
+  if (!path) return ''
+  const baseUrl = process.env.VUE_APP_MINIO_URL || '/minio/kdx-baby-provate'
+  // 确保路径没有前导斜杠
+  const cleanPath = path.replace(/^\//, '')
+  return `${baseUrl}/${cleanPath}`
+}

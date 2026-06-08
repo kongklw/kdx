@@ -49,7 +49,7 @@ module.exports = {
       //   }
       // },
       '/dev-api': {
-        target: process.env.VUE_APP_API_TARGET_DEFAULT || "http://localhost:8000",
+        target: process.env.VUE_APP_API_TARGET_DEFAULT || "http://localhost:8086",
         secure: false,
         changeOrigin: true,
         pathRewrite: {

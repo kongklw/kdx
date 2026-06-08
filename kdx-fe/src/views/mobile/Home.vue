@@ -347,6 +347,7 @@ export default {
           this.babyInfo = {}
         }
       } catch (e) {
+        console.error('Failed to fetch baby info:', e)
       }
     },
     formatGender(val) {

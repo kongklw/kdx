@@ -19,6 +19,7 @@ import shutil
 import subprocess
 from urllib.parse import unquote
 
+
 class CommonFileUpload(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -26,16 +27,16 @@ class CommonFileUpload(APIView):
         file = request.FILES.get('file', None)
         if not file:
             return Response({'code': 400, 'msg': 'No file uploaded', 'data': None})
-        
+
         # 保存文件记录到数据库并关联用户
         # FileField 会自动处理文件保存到 MEDIA_ROOT/files/... (由 user_directory_path 定义)
         file_obj = File(user=request.user, file=file, upload_method='upload')
         file_obj.save()
-        
+
         # 获取相对路径或URL
         # 注意：这里假设前端需要的是相对路径或完整URL，根据 FileField 的 url 属性
         file_url = file_obj.file.url
-        name = file_obj.file.name # 包含路径的文件名
+        name = file_obj.file.name  # 包含路径的文件名
 
         return Response({'code': 200, 'data': {'id': file_obj.id, 'name': name, 'url': file_url}, 'msg': 'ok'})
 
@@ -73,20 +74,31 @@ def _get_s3_client():
 
 
 def _minio_url_to_proxy(url: str) -> str:
-    """将 MinIO 绝对 URL 转换为通过 Nginx /minio/ 代理的路径"""
+    """将 MinIO 内部地址转换为外部访问地址（前端直接访问）"""
     if not url:
         return url
-    # 先检查是否是内部地址
-    if 'minio:9000' in url:
-        url = url.replace('http://minio:9000', '/minio').replace('https://minio:9000', '/minio')
-    else:
-        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-        if endpoint and url.startswith(endpoint):
-            url = url.replace(endpoint, '/minio')
-    # 确保没有双斜杠
-    while '//' in url:
-        url = url.replace('//', '/')
+    # 获取外部访问地址
+    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+
+    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+    if public_endpoint and endpoint and url.startswith(endpoint):
+        url = url.replace(endpoint, public_endpoint)
+
     return url
+
+    # # 先检查是否是内部地址（容器名）
+    # if 'minio:9000' in url:
+    #     if public_endpoint:
+    #         url = url.replace('http://minio:9000', public_endpoint).replace('https://minio:9000', public_endpoint)
+    # # 检查是否是其他内部地址
+    # else:
+    #     endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+    #     if public_endpoint and endpoint and url.startswith(endpoint):
+    #         url = url.replace(endpoint, public_endpoint)
+    # # 确保没有双斜杠
+    # while '//' in url:
+    #     url = url.replace('//', '/')
+    # return url
 
 
 def _make_object_key(purpose: str, filename: str) -> str:
@@ -291,29 +303,35 @@ class FileRedirectView(APIView):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if not bucket:
                 return Response({'code': 500, 'msg': 'S3 bucket not configured', 'data': None}, status=500)
+            
             s3 = _get_s3_client()
             expires_in = int(request.query_params.get('expires_in', 600) or 600)
             try:
-                s3.head_object(Bucket=bucket, Key=key)
                 url = s3.generate_presigned_url(
                     ClientMethod='get_object',
                     Params={'Bucket': bucket, 'Key': key},
                     ExpiresIn=expires_in,
                 )
-                # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
-                url = _minio_url_to_proxy(url)
+                # 将内部地址转换为外部地址
+                public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+                if public_endpoint:
+                    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+                    if endpoint and url.startswith(endpoint):
+                        url = url.replace(endpoint, public_endpoint)
                 return redirect(url)
-            except Exception:
-                src = (request.query_params.get('src') or '').strip()
-                if src:
-                    src = unquote(src)
+            except Exception as e:
+                return Response({'code': 500, 'msg': str(e), 'data': None}, status=500)
+        else:
+            src = (request.query_params.get('src') or '').strip()
+            if src:
+                src = unquote(src)
                 if (
-                    src
-                    and key.startswith('baby_album/posters/')
-                    and key.lower().endswith('.jpg')
-                    and re.match(r'^[a-zA-Z0-9/_\-.]+$', src)
-                    and '..' not in src
-                    and _ffmpeg_available()
+                        src
+                        and key.startswith('baby_album/posters/')
+                        and key.lower().endswith('.jpg')
+                        and re.match(r'^[a-zA-Z0-9/_\-.]+$', src)
+                        and '..' not in src
+                        and _ffmpeg_available()
                 ):
                     tmp_in_fd, tmp_in = tempfile.mkstemp(suffix=Path(src).suffix or '.mp4')
                     os.close(tmp_in_fd)
