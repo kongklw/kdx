@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from .models import BabyAlbum, AlbumPhoto
 from fileUpload.models import MediaAsset
+from fileUpload.views import _minio_url_to_proxy
 from .serializers import BabyAlbumSerializer
 from django.conf import settings
 from django.core.files.base import File
@@ -681,12 +682,13 @@ class AlbumVideoHlsView(APIView):
                 ExpiresIn=600,
             )
             # 将内部地址转换为外部地址
-            public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-            if public_endpoint:
-                endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                if endpoint and url.startswith(endpoint):
-                    url = url.replace(endpoint, public_endpoint)
-            return redirect(url)
+            url = _minio_url_to_proxy(url)
+            response = redirect(url)
+            # 添加 Cache-Control 头，防止浏览器缓存重定向响应（预签名URL有过期时间）
+            response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)
         if not media_root:
@@ -743,12 +745,13 @@ class AlbumVideoDashView(APIView):
                 ExpiresIn=600,
             )
             # 将内部地址转换为外部地址
-            public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-            if public_endpoint:
-                endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                if endpoint and url.startswith(endpoint):
-                    url = url.replace(endpoint, public_endpoint)
-            return redirect(url)
+            url = _minio_url_to_proxy(url)
+            response = redirect(url)
+            # 添加 Cache-Control 头，防止浏览器缓存重定向响应（预签名URL有过期时间）
+            response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response['Pragma'] = 'no-cache'
+            response['Expires'] = '0'
+            return response
 
         media_root = getattr(settings, 'MEDIA_ROOT', None)
         if not media_root:

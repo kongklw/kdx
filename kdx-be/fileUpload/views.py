@@ -313,12 +313,13 @@ class FileRedirectView(APIView):
                     ExpiresIn=expires_in,
                 )
                 # 将内部地址转换为外部地址
-                public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-                if public_endpoint:
-                    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                    if endpoint and url.startswith(endpoint):
-                        url = url.replace(endpoint, public_endpoint)
-                return redirect(url)
+                url = _minio_url_to_proxy(url)
+                response = redirect(url)
+                # 添加 Cache-Control 头，防止浏览器缓存重定向响应（预签名URL有过期时间）
+                response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response['Pragma'] = 'no-cache'
+                response['Expires'] = '0'
+                return response
             except Exception as e:
                 return Response({'code': 500, 'msg': str(e), 'data': None}, status=500)
         else:
@@ -425,7 +426,12 @@ class ImageBestRedirectView(APIView):
                 )
                 # 将 MinIO URL 转换为通过 Nginx 代理的路径，兼容 HTTP 和 HTTPS
                 url = _minio_url_to_proxy(url)
-                return redirect(url)
+                response = redirect(url)
+                # 添加 Cache-Control 头，防止浏览器缓存重定向响应（预签名URL有过期时间）
+                response['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+                response['Pragma'] = 'no-cache'
+                response['Expires'] = '0'
+                return response
 
             if src:
                 tmp_in_fd, tmp_in = tempfile.mkstemp(suffix=os.path.splitext(src)[1] or '.jpg')

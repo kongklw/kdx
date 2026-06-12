@@ -4,6 +4,7 @@ from django.conf import settings
 import re
 from urllib.parse import quote
 from fileUpload.models import File
+from fileUpload.views import _minio_url_to_proxy
 from .models import (BabyInfo, FeedMilk, SleepLog, BabyDiapers,
                      BabyExpense, Temperature, TodoList, PantsBrandModel, GrowingBlogModel,
                      BabyAlbum, AlbumPhoto, DailyHabit, GrowthRecord, MenstrualSetting, MenstrualLog, BirthdayRecord
@@ -128,11 +129,7 @@ class BabyInfoSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将内部地址转换为外部地址
-                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-                    if public_endpoint:
-                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                        if endpoint and url.startswith(endpoint):
-                            url = url.replace(endpoint, public_endpoint)
+                    url = _minio_url_to_proxy(url)
                     return url
                 except Exception as e:
                     pass
@@ -245,11 +242,7 @@ class BabyExpenseSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将内部地址转换为外部地址
-                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-                    if public_endpoint:
-                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                        if endpoint and url.startswith(endpoint):
-                            url = url.replace(endpoint, public_endpoint)
+                    url = _minio_url_to_proxy(url)
                     return url
                 except Exception:
                     pass
@@ -347,11 +340,7 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
                         ExpiresIn=600,
                     )
                     # 将内部地址转换为外部地址
-                    public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-                    if public_endpoint:
-                        endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
-                        if endpoint and url.startswith(endpoint):
-                            url = url.replace(endpoint, public_endpoint)
+                    url = _minio_url_to_proxy(url)
                     return url
                 except Exception:
                     pass
@@ -385,10 +374,31 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
         return stem or str(getattr(obj, 'id', ''))
 
     def get_thumb(self, obj):
+        """生成缩略图的预签名 URL"""
         if not obj or getattr(obj, 'is_video', False):
             return ''
         base = f'baby_album/thumbs/{self._stream_id(obj)}_w400'
         key = getattr(getattr(obj, 'image', None), 'name', None) or ''
+
+        if getattr(settings, 'USE_S3_MEDIA', False):
+            bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            if bucket:
+                s3 = _get_s3_client()
+                # 优先返回已生成的缩略图
+                for ext in ['.webp', '.avif', '.jpg']:
+                    thumb_key = f'{base}{ext}'
+                    try:
+                        s3.head_object(Bucket=bucket, Key=thumb_key)
+                        url = s3.generate_presigned_url(
+                            ClientMethod='get_object',
+                            Params={'Bucket': bucket, 'Key': thumb_key},
+                            ExpiresIn=600,
+                        )
+                        url = _minio_url_to_proxy(url)
+                        return url
+                    except Exception:
+                        continue
+
         if not key:
             return f'/file/img?base={quote(base)}'
         return f'/file/img?base={quote(base)}&src={quote(key)}'
@@ -412,25 +422,80 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
         return f'/baby/albums/video/{quote(sid)}/dash/manifest.mpd?src={quote(key)}'
 
     def get_image(self, obj):
+        """生成预签名 URL"""
         if not obj or not getattr(obj, 'image', None):
             return ''
         key = getattr(obj.image, 'name', None) or ''
         if not key:
             return ''
+
+        if getattr(settings, 'USE_S3_MEDIA', False):
+            bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            if bucket:
+                s3 = _get_s3_client()
+                try:
+                    url = s3.generate_presigned_url(
+                        ClientMethod='get_object',
+                        Params={'Bucket': bucket, 'Key': key},
+                        ExpiresIn=600,
+                    )
+                    # 将内部地址转换为外部地址
+                    url = _minio_url_to_proxy(url)
+                    return url
+                except Exception:
+                    pass
+
         return f'/file/r?key={quote(key)}'
 
     def get_poster(self, obj):
+        """生成视频封面的预签名 URL"""
         if not obj or not getattr(obj, 'is_video', False):
             return ''
+        
+        # 优先使用已保存的 poster 字段
         if getattr(obj, 'poster', None):
             key = getattr(obj.poster, 'name', None) or ''
             if key:
+                if getattr(settings, 'USE_S3_MEDIA', False):
+                    bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+                    if bucket:
+                        s3 = _get_s3_client()
+                        try:
+                            url = s3.generate_presigned_url(
+                                ClientMethod='get_object',
+                                Params={'Bucket': bucket, 'Key': key},
+                                ExpiresIn=600,
+                            )
+                            url = _minio_url_to_proxy(url)
+                            return url
+                        except Exception:
+                            pass
                 return f'/file/r?key={quote(key)}'
+        
+        # 如果没有保存的 poster，尝试返回生成的海报
         src = getattr(getattr(obj, 'image', None), 'name', None) or ''
         if not src:
             return ''
         sid = self._stream_id(obj)
         poster_key = f'baby_album/posters/{sid}.jpg'
+        
+        # 检查海报是否已生成
+        if getattr(settings, 'USE_S3_MEDIA', False):
+            bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
+            if bucket:
+                s3 = _get_s3_client()
+                try:
+                    s3.head_object(Bucket=bucket, Key=poster_key)
+                    url = s3.generate_presigned_url(
+                        ClientMethod='get_object',
+                        Params={'Bucket': bucket, 'Key': poster_key},
+                        ExpiresIn=600,
+                    )
+                    url = _minio_url_to_proxy(url)
+                    return url
+                except Exception:
+                    pass
+        
         return f'/file/r?key={quote(poster_key)}&src={quote(src)}'
 
 
