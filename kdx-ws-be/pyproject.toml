@@ -16,6 +16,7 @@ dependencies = [
   "langgraph>=0.2,<0.4",
   "loguru>=0.7.3",
   "python-multipart>=0.0.29",
+  "sqlalchemy>=2.0.51",
 ]
 
 [build-system]

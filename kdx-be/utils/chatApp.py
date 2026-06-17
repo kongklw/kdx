@@ -20,7 +20,7 @@ def obtain_app(type='norm', need_mem=True):
     model = ChatOpenAI(
         api_key=settings.DASHSCOPE_API_KEY,
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        model="qwen-vl-max-latest",
+        model="qwen3.7-plus",
     )
     json_model = model.bind(response_format={"type": "json_object"})
 

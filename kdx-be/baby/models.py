@@ -305,8 +305,32 @@ class BirthdayRecord(models.Model):
     lunar_day = models.IntegerField(blank=True, null=True)
     lunar_is_leap = models.BooleanField(default=False)
 
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateField(auto_now_add=True)
+    updated_at = models.DateField(auto_now=True)
 
     class Meta:
         ordering = ['-updated_at', '-id']
+
+
+class UserAccessLog(models.Model):
+    """用户访问日志"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='access_logs')
+    path = models.CharField(max_length=500, verbose_name='请求路径')
+    method = models.CharField(max_length=10, verbose_name='请求方法')
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name='IP地址')
+    user_agent = models.CharField(max_length=500, null=True, blank=True, verbose_name='User Agent')
+    response_status = models.IntegerField(verbose_name='响应状态码')
+    duration = models.FloatField(verbose_name='响应时间(秒)')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='访问时间')
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = '用户访问日志'
+        verbose_name_plural = '用户访问日志'
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['path', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.path} - {self.created_at}"

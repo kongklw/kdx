@@ -1,7 +1,7 @@
 from django.urls import path, include
 from . import (views, temperature_views, baby_pants_view, todo_views,
                dashboard_views, sleep_views, expense_views, growing_blog_view,
-               breast_feed_views, baby_info_views, album_views, body_views, vaccine_views, period_views)
+               breast_feed_views, baby_info_views, album_views, body_views, vaccine_views, period_views, access_views)
 
 urlpatterns = [
 
@@ -61,4 +61,9 @@ urlpatterns = [
     path('period/settings', period_views.PeriodSettingsView.as_view()),
 
     path('birthday', views.BirthdayView.as_view()),
+    
+    # User access statistics
+    path('access/stats', access_views.UserAccessStatsView.as_view()),
+    path('access/detail', access_views.UserAccessDetailView.as_view()),
+    path('access/detail/<str:path>', access_views.UserAccessDetailView.as_view()),
 ]

@@ -11,7 +11,7 @@ from urllib.parse import quote
 from loguru import logger
 
 from ..core.config import Settings
-from ..core.security import extract_token_from_headers, verify_jwt
+from ..core.security import extract_token_from_headers, extract_token_from_cookie, verify_jwt
 from ..utils.event import (
     event_to_dict,
     VoiceAgentEvent,
@@ -28,7 +28,7 @@ from ..utils.merge_things import merge_async_iters
 from langchain_core.runnables import RunnableGenerator
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, AIMessageChunk, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver as InMemorySaver
 
@@ -124,7 +124,7 @@ class DashscopeRealtimeASR:
 
         self._ws = await websockets.connect(
             self.url,
-            additional_headers={"Authorization": f"Bearer {self.api_key}"},
+            extra_headers={"Authorization": f"Bearer {self.api_key}"},
         )
         await self._ws.send(json.dumps(self._run_task_instruction()))
         self._recv_task = asyncio.create_task(self._recv_loop())
@@ -179,7 +179,14 @@ class DashscopeRealtimeASR:
                     continue
                 if event == "task-failed":
                     self._started.set()
-                    raise RuntimeError(header.get("error_message") or "dashscope asr task failed")
+                    error_code = header.get("error_code")
+                    error_message = header.get("error_message") or "dashscope asr task failed"
+                    # NO_VALID_AUDIO_ERROR is expected when user opens/closes without speaking
+                    if error_code == "NO_VALID_AUDIO_ERROR":
+                        logger.info(f"DashScope ASR task failed due to no audio: {error_message}")
+                        self._finished = True
+                        return
+                    raise RuntimeError(error_message)
                 if event == "result-generated":
                     payload = msg.get("payload") or {}
                     output = payload.get("output") or {}
@@ -228,11 +235,13 @@ class DashscopeRealtimeASR:
     async def finish(self) -> None:
         if self._closed or self._finished:
             return
-        await self._ensure_connection()
+        self._finished = True
+        # Only send finish instruction if we actually connected to ASR service
         ws = self._ws
         if ws is None:
+            # Never connected, just clean up
+            await self._queue.put(self._close_sentinel)
             return
-        self._finished = True
         with contextlib.suppress(Exception):
             await ws.send(json.dumps(self._finish_task_instruction()))
         with contextlib.suppress(Exception):
@@ -322,7 +331,7 @@ class DashscopeQwenTtsRealtime:
         if "?" not in url:
             url = f"{url}?model={quote(model)}"
         headers = {"Authorization": f"Bearer {self.api_key}"}
-        async with websockets.connect(url, additional_headers=headers) as websocket:
+        async with websockets.connect(url, extra_headers=headers) as websocket:
             while True:
                 raw = await websocket.recv()
                 event = json.loads(raw)
@@ -562,8 +571,17 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
 
                 async for message, metadata in stream:
                     print(f'2.1 message {message} and meta_data {metadata}')
-                    if isinstance(message, AIMessage):
-                        yield AgentChunkEvent.create(message.text)
+                    # Handle both AIMessage and AIMessageChunk types
+                    if isinstance(message, (AIMessage, AIMessageChunk)):
+                        # Handle both method and property access patterns for LangChain compatibility
+                        if hasattr(message, 'content'):
+                            text = message.content
+                        elif callable(message.text):
+                            text = message.text()
+                        else:
+                            text = message.text
+                        if text:  # Only yield if there's actual content
+                            yield AgentChunkEvent.create(text)
 
                         if hasattr(message, 'tool_calls') and message.tool_calls:
                             for tool_call in message.tool_calls:
@@ -673,18 +691,35 @@ async def voice_agent_langchain(
         settings: Settings,
 ) -> None:
     user: Optional[Dict[str, Any]] = None
-    if not settings.allow_anon_ws:
-        token = ws.query_params.get("token") or extract_token_from_headers(
-            ws.headers.get("authorization")
-        )
-        if not token:
-            await ws.close(code=4401, reason="missing token")
-            return
-        try:
-            user = verify_jwt(token, settings)
-        except Exception as e:
-            await ws.close(code=4401, reason=str(e))
-            return
+    
+    # 标准认证流程：从多个来源获取 token
+    # 优先级: URL参数 > Authorization header > Cookie
+    token: Optional[str] = None
+    
+    # 1. 从 URL 参数获取 token
+    token = ws.query_params.get("token")
+    
+    # 2. 从 Authorization header 获取 token (Bearer token)
+    if not token:
+        token = extract_token_from_headers(ws.headers.get("authorization"))
+    
+    # 3. 从 Cookie 获取 token (Admin-Token)
+    if not token:
+        token = extract_token_from_cookie(ws.headers.get("cookie"))
+    
+    # 验证 token（生产环境必须验证）
+    if not token:
+        await ws.close(code=4401, reason="missing token: token is required for WebSocket connection")
+        logger.warning("WebSocket connection rejected: no token provided")
+        return
+    
+    try:
+        user = verify_jwt(token, settings)
+        logger.info(f"WebSocket authenticated user: {user.get('user_id')}")
+    except Exception as e:
+        await ws.close(code=4401, reason=f"invalid token: {str(e)}")
+        logger.warning(f"WebSocket connection rejected: invalid token - {str(e)}")
+        return
 
     await ws.accept()
     await ws.send_json(

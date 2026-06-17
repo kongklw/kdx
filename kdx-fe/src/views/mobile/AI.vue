@@ -17,7 +17,6 @@
       v-model="showVoiceAssistant"
       position="bottom"
       round
-      closeable
       :style="{ height: '82vh' }"
       class="voice-popup"
       @close="handleClose"
@@ -29,7 +28,7 @@
             <div :class="['va-status', isWsOpen ? 'ok' : 'bad']">
               {{ isWsOpen ? 'CONNECTED' : wsStatusText }}
             </div>
-            <van-icon name="setting-o" class="va-setting" @click="showWsSettings = true" />
+            <van-icon name="cross" class="va-close" @click="showVoiceAssistant = false" />
           </div>
         </div>
 
@@ -113,7 +112,6 @@
       v-model="showVoiceAssistantLangchain"
       position="bottom"
       round
-      closeable
       :style="{ height: '82vh' }"
       class="voice-popup"
       @close="handleCloseLangchain"
@@ -125,7 +123,7 @@
             <div :class="['va-status', isWsOpenLangchain ? 'ok' : 'bad']">
               {{ isWsOpenLangchain ? 'CONNECTED' : wsStatusTextLangchain }}
             </div>
-            <van-icon name="setting-o" class="va-setting" @click="showWsSettingsLangchain = true" />
+            <van-icon name="cross" class="va-close" @click="showVoiceAssistantLangchain = false" />
           </div>
         </div>
 
@@ -1425,6 +1423,11 @@ export default {
 .va-setting {
   font-size: 18px;
   color: #666;
+}
+.va-close {
+  font-size: 20px;
+  color: #999;
+  margin-left: 8px;
 }
 .va-status {
   font-size: 12px;

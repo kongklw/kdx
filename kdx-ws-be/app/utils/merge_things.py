@@ -47,9 +47,17 @@ async def merge_async_iters(*aiters: AsyncIterator[T]) -> AsyncIterator[T]:
     sentinel = object()
 
     async def producer(aiter: AsyncIterator[Any]) -> None:
-        async for item in aiter:
-            await queue.put(item)
-        await queue.put(sentinel)
+        try:
+            async for item in aiter:
+                await queue.put(item)
+        except (GeneratorExit, asyncio.CancelledError):
+            # Handle graceful shutdown when connection is closed
+            pass
+        except Exception:
+            # Log and continue on unexpected errors
+            pass
+        finally:
+            await queue.put(sentinel)
 
     async with asyncio.TaskGroup() as tg:
         for aiter in aiters:
