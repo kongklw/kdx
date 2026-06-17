@@ -414,8 +414,19 @@ export default {
       this.isPressing = false
     },
     getDefaultWsUrl() {
+      // 生产环境：通过 Nginx 代理路径连接
+      // 开发环境：直接连接本地 8001 端口
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      return `${scheme}://127.0.0.1:8001/ws/voice-agent`
+      const host = window.location.host
+
+      // 判断是否为生产环境（非 localhost 且非 127.0.0.1）
+      if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+        // 生产环境：使用当前域名 + Nginx 代理路径
+        return `${scheme}://${host}/prod-ai/ws/voice-agent`
+      } else {
+        // 开发环境：直接连接本地后端
+        return `${scheme}://127.0.0.1:8001/ws/voice-agent`
+      }
     },
     setWsUrlToHost() {
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -757,8 +768,19 @@ export default {
       this.logsLangchain = []
     },
     getDefaultWsUrlLangchain() {
+      // 生产环境：通过 Nginx 代理路径连接
+      // 开发环境：直接连接本地 8001 端口
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      return `${scheme}://127.0.0.1:8001/ws/voice_agent_langchain`
+      const host = window.location.host
+
+      // 判断是否为生产环境（非 localhost 且非 127.0.0.1）
+      if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+        // 生产环境：使用当前域名 + Nginx 代理路径
+        return `${scheme}://${host}/prod-ai/ws/voice_agent_langchain`
+      } else {
+        // 开发环境：直接连接本地后端
+        return `${scheme}://127.0.0.1:8001/ws/voice_agent_langchain`
+      }
     },
     setWsUrlToHostLangchain() {
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
