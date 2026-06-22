@@ -64,7 +64,7 @@ services:
     env_file:
       - kdx-ws-be/.env
     expose:
-      - "8001"
+      - "8002"
     volumes:
       - ./kdx-ws-be/app:/app/app
       - ./kdx-ws-be/scripts:/app/scripts

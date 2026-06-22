@@ -707,7 +707,7 @@ async def voice_agent_langchain(
     if not token:
         token = extract_token_from_cookie(ws.headers.get("cookie"))
     
-    # 验证 token（生产环境必须验证）
+    # 验证 token（生产环境必须验证，不允许匿名连接）
     if not token:
         await ws.close(code=4401, reason="missing token: token is required for WebSocket connection")
         logger.warning("WebSocket connection rejected: no token provided")
