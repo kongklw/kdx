@@ -73,13 +73,14 @@ def _get_s3_client():
     )
 
 
-def _minio_url_to_proxy(url: str) -> str:
+def _minio_url_to_proxy(url: str, for_backend: bool = False) -> str:
     """将 MinIO 内部地址转换为外部访问地址（前端直接访问）"""
     if not url:
         return url
-    # 获取外部访问地址
+    if for_backend:
+        return url
+    
     public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
-
     endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
     if public_endpoint and endpoint and url.startswith(endpoint):
         url = url.replace(endpoint, public_endpoint)
@@ -193,9 +194,14 @@ class PresignInitView(APIView):
             ExpiresIn=int(payload.get('expires_in', 600) or 600),
         )
 
-        # 将绝对 URL 转换为相对路径，通过 Nginx /minio/ 代理访问
-        if endpoint and upload_url.startswith(endpoint):
-            upload_url = upload_url.replace(endpoint, '/minio/')
+        # 将绝对 URL 转换为外部访问地址（通过 Nginx /minio/ 代理）
+        public_endpoint = getattr(settings, 'MINIO_PUBLIC_ENDPOINT_URL', None)
+        if public_endpoint and endpoint and upload_url.startswith(endpoint):
+            upload_url = upload_url.replace(endpoint, public_endpoint)
+        elif endpoint and upload_url.startswith(endpoint):
+            upload_url = upload_url.replace(endpoint, '/minio')
+            if not upload_url.startswith('/minio/'):
+                upload_url = upload_url.replace('/minio', '/minio/')
 
         return Response({
             'code': 200,

@@ -21,6 +21,46 @@ def _get_face_service():
     return face_service
 
 
+def _get_presigned_url_from_face_url(face_url: str) -> str:
+    """从存储的 face_url 中解析 bucket 和 object_key，生成新的预签名 URL"""
+    if not face_url:
+        return face_url
+    
+    from django.conf import settings
+    from fileUpload.views import _get_s3_client, _minio_url_to_proxy
+    
+    endpoint = getattr(settings, 'AWS_S3_ENDPOINT_URL', None)
+    if not endpoint:
+        return face_url
+    
+    try:
+        if face_url.startswith(endpoint):
+            path = face_url[len(endpoint):]
+            if path.startswith('/'):
+                path = path[1:]
+            
+            query_index = path.find('?')
+            if query_index > 0:
+                path = path[:query_index]
+            
+            parts = path.split('/', 1)
+            if len(parts) >= 2:
+                bucket = parts[0]
+                object_key = parts[1]
+                
+                s3 = _get_s3_client()
+                presigned_url = s3.generate_presigned_url(
+                    ClientMethod='get_object',
+                    Params={'Bucket': bucket, 'Key': object_key},
+                    ExpiresIn=600,
+                )
+                return _minio_url_to_proxy(presigned_url)
+    except Exception as e:
+        logger.error(f"Failed to generate presigned URL from face_url: {e}")
+    
+    return face_url
+
+
 class FaceInfoView(APIView):
     """获取用户人脸信息"""
     permission_classes = [IsAuthenticated]
@@ -31,9 +71,10 @@ class FaceInfoView(APIView):
             face_record = FaceRecord.objects.filter(user=request.user).first()
 
             if face_record:
+                face_url = _get_presigned_url_from_face_url(face_record.face_url)
                 data = {
                     'has_face': True,
-                    'face_url': face_record.face_url,
+                    'face_url': face_url,
                     'created_at': face_record.created_at
                 }
             else:
@@ -68,7 +109,16 @@ class FaceUploadView(APIView):
             print(f'111111 {serializer.data}')
             face_url = serializer.validated_data['face_url']
 
-            image = face_service.download_image_from_url(face_url)
+            image = None
+            asset_id = request.data.get('asset_id')
+            if asset_id and getattr(settings, 'USE_S3_MEDIA', False):
+                from fileUpload.models import MediaAsset
+                asset = MediaAsset.objects.filter(id=asset_id, user=request.user).first()
+                if asset:
+                    image = face_service.download_image_from_minio(asset.bucket, asset.object_key)
+            
+            if image is None:
+                image = face_service.download_image_from_url(face_url)
             if image is None:
                 return Response({'code': 400, 'data': None, 'msg': '无法下载图片'}, status=status.HTTP_400_BAD_REQUEST)
 

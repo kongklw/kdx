@@ -72,6 +72,14 @@ module.exports = {
         pathRewrite: {
           "^/prod-ai": ""
         }
+      },
+      '/minio': {
+        target: process.env.VUE_APP_MINIO_TARGET || "http://47.95.15.228:9000",
+        secure: false,
+        changeOrigin: true,
+        pathRewrite: {
+          "^/minio": ""
+        }
       }
     }
   },

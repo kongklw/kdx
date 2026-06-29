@@ -76,6 +76,35 @@ class FaceRecognitionService:
             logger.error(f"Unexpected error downloading image from {url}: {e}")
             return None
 
+    def download_image_from_minio(self, bucket: str, object_key: str) -> Optional[np.ndarray]:
+        """从 MinIO 内部地址下载图片"""
+        try:
+            import os
+            import sys
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'kdemo.settings')
+            import django
+            django.setup()
+            
+            from django.conf import settings
+            from fileUpload.views import _get_s3_client
+
+            s3 = _get_s3_client()
+            response = s3.get_object(Bucket=bucket, Key=object_key)
+            image_data = response['Body'].read()
+
+            image_array = np.frombuffer(image_data, dtype=np.uint8)
+            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+            if image is None:
+                logger.error("Failed to decode image: invalid image format")
+                return None
+
+            return image
+
+        except Exception as e:
+            logger.error(f"Error downloading image from MinIO: {e}")
+            return None
+
     def detect_faces(self, image: np.ndarray) -> Tuple[bool, List[Dict[str, Any]]]:
         """检测图片中的所有人脸"""
         if not self._ensure_initialized():

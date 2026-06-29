@@ -1224,7 +1224,10 @@ export default {
         throw new Error((urlResponse && urlResponse.msg) || '获取文件URL失败')
       }
 
-      return urlResponse.data.url
+      return {
+        url: urlResponse.data.url,
+        asset_id: assetId
+      }
     },
     async uploadByForm(file) {
       // 降级方案：直接通过表单上传到后端
@@ -1277,11 +1280,14 @@ export default {
 
       try {
         // 使用 MiniIO 上传流程
-        const faceUrl = await this.uploadToMinIO(file)
+        const result = await this.uploadToMinIO(file)
+        const faceUrl = result.url
+        const assetId = result.asset_id
 
         // 调用 Django 人脸识别 API 上传人脸
         const response = await this.$axios.post('/face/upload', {
-          face_url: faceUrl
+          face_url: faceUrl,
+          asset_id: assetId
         })
 
         // axios拦截器已经处理过响应，response直接是后端返回的{code, data, msg}
@@ -1325,24 +1331,29 @@ export default {
         this.faceStatus = 'recognizing'
         this.recognitionResult = null
 
+        console.log('[Face Recognition] Step 1: Requesting camera permission...')
         // 请求摄像头权限
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }})
+        console.log('[Face Recognition] Step 1: Camera permission granted')
 
         // 获取视频元素并显示摄像头画面
         const video = this.$refs.videoRef
         if (video) {
           video.srcObject = stream
           await video.play()
+          console.log('[Face Recognition] Step 2: Video started playing')
         }
 
         // 等待摄像头就绪并拍照
         await new Promise(resolve => setTimeout(resolve, 2000))
+        console.log('[Face Recognition] Step 3: Camera ready, taking photo...')
 
         // 拍照
         const canvas = document.createElement('canvas')
         const videoElement = video || document.createElement('video')
         canvas.width = videoElement.videoWidth || 640
         canvas.height = videoElement.videoHeight || 480
+        console.log(`[Face Recognition] Step 3: Canvas size: ${canvas.width}x${canvas.height}`)
         const ctx = canvas.getContext('2d')
         ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
 
@@ -1358,17 +1369,23 @@ export default {
 
         // 转换为 Blob
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg'))
+        console.log(`[Face Recognition] Step 4: Blob created, size: ${blob.size} bytes`)
 
         // 创建 File 对象
         const file = new File([blob], 'face_capture.jpg', { type: 'image/jpeg' })
 
         // 使用 MiniIO 上传流程
-        const faceUrl = await this.uploadToMinIO(file)
+        console.log('[Face Recognition] Step 5: Uploading to MinIO...')
+        const result = await this.uploadToMinIO(file)
+        const faceUrl = result.url
+        console.log(`[Face Recognition] Step 5: Upload successful, faceUrl: ${faceUrl}`)
 
         // 调用 Django 人脸识别 API 进行比对
+        console.log('[Face Recognition] Step 6: Calling /face/match API...')
         const response = await this.$axios.post('/face/match', {
           face_url: faceUrl
         })
+        console.log('[Face Recognition] Step 6: API response:', response)
 
         // axios拦截器已经处理过响应，response直接是后端返回的{code, data, msg}
         if (response.code === 200) {
