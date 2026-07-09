@@ -297,9 +297,9 @@ export default {
         case 'Album':
           return { type, label: '相册', icon: 'funny2', value: '照片', iconClass: 'icon-money' }
         case 'VaccineSchedule':
-          return { type, label: '疫苗时间表', icon: 'tab', value: '', iconClass: 'icon-money' }
+          return { type, label: '疫苗时间表', icon: 'vaccine', value: '', iconClass: 'icon-money' }
         case 'Period':
-          return { type, label: '经期记录', icon: 'tab', value: '记录', iconClass: 'icon-money' }
+          return { type, label: '经期记录', icon: 'period', value: '记录', iconClass: 'icon-money' }
         case 'Birthday':
           return { type, label: '生日', icon: 'birthday', value: '', iconClass: 'icon-money' }
         default:

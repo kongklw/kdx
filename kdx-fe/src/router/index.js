@@ -168,6 +168,12 @@ export const constantRoutes = [
         meta: { title: 'Langchain' }
       },
       {
+        path: 'ragchat',
+        component: () => import('@/views/mobile/functions/RagChat'),
+        name: 'MobileRagChat',
+        meta: { title: '育儿知识库' }
+      },
+      {
         path: 'album',
         component: () => import('@/views/mobile/functions/Album'),
         name: 'MobileAlbum',

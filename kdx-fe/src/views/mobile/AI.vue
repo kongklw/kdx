@@ -4,10 +4,25 @@
 
     <van-grid :column-num="2" :gutter="10" clickable class="ai-grid">
       <van-grid-item icon="chat-o" text="Langchain Chat" to="/mobile/functions/langchain" />
-      <van-grid-item icon="photo-o" text="Image Generation" />
+      <van-grid-item text="RAG Knowledge" to="/mobile/functions/ragchat">
+        <template #icon>
+          <svg viewBox="0 0 48 48" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="8" y="12" width="32" height="28" rx="2" fill="#6366f1" />
+            <rect x="10" y="14" width="28" height="4" fill="#fff" opacity="0.3" />
+            <rect x="10" y="20" width="24" height="3" fill="#fff" opacity="0.5" />
+            <rect x="10" y="25" width="20" height="3" fill="#fff" opacity="0.5" />
+            <rect x="10" y="30" width="16" height="3" fill="#fff" opacity="0.5" />
+            <circle cx="38" cy="18" r="5" fill="#fff" />
+            <path d="M36 18l2 2 4-4" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="38" cy="34" r="5" fill="#fcd34d" />
+            <path d="M36 34l3 3 5-5" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </template>
+      </van-grid-item>
+      <van-grid-item icon="photo-o" text="Image Generation" @click="showNotSupported('Image Generation')" />
       <van-grid-item icon="music-o" text="Voice Assistant" @click="openVoiceAssistant" />
       <van-grid-item icon="star-o" text="Voice Assistant (LC)" @click="openVoiceAssistantLangchain" />
-      <van-grid-item icon="video-o" text="Video Creator" />
+      <van-grid-item icon="video-o" text="Video Creator" @click="showNotSupported('Video Creator')" />
       <van-grid-item icon="user-o" text="Face Recognition" @click="openFaceRecognition" />
     </van-grid>
 
@@ -405,6 +420,12 @@ export default {
     },
     openVoiceAssistantLangchain() {
       this.showVoiceAssistantLangchain = true
+    },
+    showNotSupported(featureName) {
+      this.$toast({
+        message: `${featureName} 暂时不支持`,
+        position: 'top'
+      })
     },
     handleClose() {
       this.stopRecording()
@@ -1434,6 +1455,18 @@ export default {
 }
 .ai-grid {
     padding-top: 10px;
+}
+.custom-ai-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    :deep(.svg-icon) {
+        width: 100%;
+        height: 100%;
+    }
 }
 .voice-popup {
   display: flex;

@@ -15,3 +15,11 @@ export function askAIReq(data) {
     data
   })
 }
+
+export function ragQueryReq(data) {
+  return request({
+    url: '/rag/query/',
+    method: 'post',
+    data
+  })
+}

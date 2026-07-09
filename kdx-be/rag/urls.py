@@ -3,8 +3,6 @@ from . import views
 
 
 urlpatterns = [
-
-    # period tracker
     path("common/", views.CommonView.as_view(), name='common rag view'),
-
+    path("query/", views.RAGQueryView.as_view(), name='rag query view'),
 ]
