@@ -26,28 +26,38 @@ ENV PIP_CONNECT_TIMEOUT=60
 ENV ORT_DISABLE_CPU_OPTIMIZATION 1
 ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
 
+# 创建非 root 用户
+RUN useradd -m -u 1000 appuser
+
 # 工作目录
 WORKDIR /app
 
 # 复制项目配置文件
 COPY ./kdx-ws-be/requirements.txt /app/requirements.txt
 
-# 安装依赖（使用 pip）
+# 使用 --break-system-packages 选项抑制警告（在容器环境中是安全的）
 RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
+    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir --break-system-packages
 
 # 复制应用代码和脚本
 COPY ./kdx-ws-be/app /app/app
 COPY ./kdx-ws-be/scripts /app/scripts
 
-# 创建 InsightFace 模型目录
-RUN mkdir -p /root/.insightface/models
+# 创建 InsightFace 模型目录并设置权限
+RUN mkdir -p /home/appuser/.insightface/models && \
+    chown -R appuser:appuser /home/appuser/.insightface
 
-# 从 kdx-be 目录复制本地模型（与 kdx-be 保持一致）
-COPY ./kdx-be/buffalo_l.zip /tmp/buffalo_l.zip
-RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
+# 复制并解压模型文件
+COPY ./kdx-ws-be/buffalo_l.zip /tmp/buffalo_l.zip
+RUN unzip -q /tmp/buffalo_l.zip -d /home/appuser/.insightface/models/ && \
     rm /tmp/buffalo_l.zip && \
-    chmod -R 755 /root/.insightface
+    chown -R appuser:appuser /home/appuser/.insightface
+
+# 设置 InsightFace 模型路径环境变量
+ENV INSIGHTFACE_HOME=/home/appuser/.insightface
+
+# 切换到非 root 用户
+USER appuser
 
 # 暴露端口
 EXPOSE 8002
