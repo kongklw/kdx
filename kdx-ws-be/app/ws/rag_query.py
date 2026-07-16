@@ -25,7 +25,7 @@ def get_embedding_function():
     global _embedding_function
     if _embedding_function is not None:
         return _embedding_function
-    from ..scripts.text2vec_embedding import Text2VecEmbeddingFunction
+    from ..scripts.text2vec_embedding_text2vec import Text2VecEmbeddingFunction
     _embedding_function = Text2VecEmbeddingFunction()
     return _embedding_function
 

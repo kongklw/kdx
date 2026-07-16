@@ -53,12 +53,14 @@ SOURCE_AUTHORITY = {
     '搜索结果': 2,
 }
 
+
 def detect_topics(content):
     topics = []
     for topic, keywords in TOPIC_KEYWORDS.items():
         if any(kw in content for kw in keywords):
             topics.append(topic)
     return topics if topics else ['综合知识']
+
 
 def detect_age_range(content):
     age_ranges = []
@@ -67,16 +69,18 @@ def detect_age_range(content):
             age_ranges.append(age_range)
     return age_ranges if age_ranges else ['0-3岁']
 
+
 def get_authority_level(category):
     return SOURCE_AUTHORITY.get(category, 3)
 
+
 def split_document_by_section(content, chunk_size=500, chunk_overlap=50):
     sections = re.split(r'(^##\s+.+)', content, flags=re.MULTILINE)
-    
+
     chunks = []
     current_chunk = ''
     current_section = ''
-    
+
     for i, part in enumerate(sections):
         if part.startswith('## '):
             if current_chunk.strip():
@@ -98,14 +102,15 @@ def split_document_by_section(content, chunk_size=500, chunk_overlap=50):
                             'section': current_section
                         })
                     current_chunk = sentence + '\n'
-    
+
     if current_chunk.strip():
         chunks.append({
             'content': current_chunk.strip(),
             'section': current_section
         })
-    
+
     return chunks
+
 
 def deduplicate_chunks(chunks):
     seen = set()
@@ -117,16 +122,19 @@ def deduplicate_chunks(chunks):
             unique_chunks.append(chunk)
     return unique_chunks
 
+
 def filter_low_quality_chunks(chunks, min_length=100):
     return [chunk for chunk in chunks if len(chunk['content']) >= min_length]
+
 
 def extract_metadata_from_content(content):
     title_match = re.search(r'^#\s+(.+)', content)
     title = title_match.group(1).strip() if title_match else '未命名文档'
-    
+
     source_match = re.search(r'\*\*来源\*\*:\s*\[(.+)\]\(.+\)', content)
     source = source_match.group(1).strip() if source_match else '未知来源'
-    
+
+
     return {
         'title': title,
         'source': source,
@@ -134,27 +142,30 @@ def extract_metadata_from_content(content):
         'age_ranges': detect_age_range(content),
     }
 
+
 def load_markdown_files():
     documents = []
     seen_titles = set()
-    
+
     for category in os.listdir(RAG_DATA_DIR):
+
         category_path = RAG_DATA_DIR / category
+
+
         if os.path.isdir(category_path) and category != '__pycache__':
             for filename in os.listdir(category_path):
                 if filename.endswith('.md') and filename != 'Untitled.md':
                     filepath = category_path / filename
+
                     try:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             content = f.read()
-                        
                         metadata = extract_metadata_from_content(content)
-                        
                         if metadata['title'] in seen_titles:
                             print(f"重复文档跳过: {metadata['title']}")
                             continue
                         seen_titles.add(metadata['title'])
-                        
+
                         documents.append({
                             'category': category,
                             'filename': filename,
@@ -168,9 +179,10 @@ def load_markdown_files():
 
                     except Exception as e:
                         print(f"读取文件失败 {filepath}: {e}")
-    
+
     print(f"加载了 {len(documents)} 个去重后的文档")
     return documents
+
 
 def split_document(content, chunk_size=500, chunk_overlap=50):
     chunks = split_document_by_section(content, chunk_size, chunk_overlap)
@@ -178,30 +190,31 @@ def split_document(content, chunk_size=500, chunk_overlap=50):
     chunks = deduplicate_chunks(chunks)
     return chunks
 
+
 def init_chroma_db(documents):
     import time
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    
+
     from chromadb import PersistentClient
-    from app.scripts.text2vec_embedding import Text2VecEmbeddingFunction
-    
+    from app.scripts.text2vec_embedding_text2vec import Text2VecEmbeddingFunction
+
     print("Step 1: Creating embedding function...")
     t0 = time.time()
     embedding_function = Text2VecEmbeddingFunction()
     t1 = time.time()
-    print(f"Step 1 done: Embedding function loaded in {t1-t0:.2f}s: {embedding_function.name()}")
-    
+    print(f"Step 1 done: Embedding function loaded in {t1 - t0:.2f}s: {embedding_function.name()}")
+
     if CHROMA_DB_DIR.exists():
         shutil.rmtree(CHROMA_DB_DIR)
         print("Existing ChromaDB cleared")
-    
+
     print("Step 2: Creating PersistentClient...")
     t0 = time.time()
     client = PersistentClient(path=str(CHROMA_DB_DIR))
     t1 = time.time()
-    print(f"Step 2 done: PersistentClient created in {t1-t0:.2f}s")
-    
+    print(f"Step 2 done: PersistentClient created in {t1 - t0:.2f}s")
+
     print("Step 3: Creating collection...")
     t0 = time.time()
     collection = client.get_or_create_collection(
@@ -210,13 +223,13 @@ def init_chroma_db(documents):
         metadata={"hnsw:space": "cosine"}
     )
     t1 = time.time()
-    print(f"Step 3 done: Collection created in {t1-t0:.2f}s")
-    
+    print(f"Step 3 done: Collection created in {t1 - t0:.2f}s")
+
     texts = []
     metadatas = []
     ids = []
     doc_ids = []
-    
+
     print(f"Processing {len(documents)} documents...")
     for doc_idx, doc in enumerate(documents):
         chunks = split_document(doc['content'])
@@ -236,33 +249,34 @@ def init_chroma_db(documents):
             })
             ids.append(f"{doc['filename']}_{i}")
             doc_ids.append(doc['filename'])
-        
+
         if (doc_idx + 1) % 10 == 0:
             print(f"Processed {doc_idx + 1}/{len(documents)} documents, {len(texts)} chunks collected")
-    
+
     print(f"Total chunks to add: {len(texts)}")
-    
+
     batch_size = 100
     for i in range(0, len(texts), batch_size):
         end = min(i + batch_size, len(texts))
         batch_texts = texts[i:end]
         batch_metadatas = metadatas[i:end]
         batch_ids = ids[i:end]
-        
-        print(f"Adding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size} ({len(batch_texts)} chunks)...")
+
+        print(
+            f"Adding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size} ({len(batch_texts)} chunks)...")
         collection.add(
             documents=batch_texts,
             metadatas=batch_metadatas,
             ids=batch_ids
         )
         print(f"Batch {i // batch_size + 1} added, current count: {collection.count()}")
-    
+
     print(f"已加载 {len(texts)} 个文档块到 Chroma")
     print(f"覆盖 {len(set(doc_ids))} 个文档")
-    
+
     stats_count = collection.count()
     print(f"向量数据库统计: {stats_count} 条记录")
-    
+
     summary = {
         'total_documents': len(set(doc_ids)),
         'total_chunks': len(texts),
@@ -270,31 +284,33 @@ def init_chroma_db(documents):
         'topics': list(set([t for m in metadatas for t in m['topics']])),
         'age_ranges': list(set([a for m in metadatas for a in m['age_ranges']])),
     }
-    
+
     summary_path = CHROMA_DB_DIR / 'db_summary.json'
     with open(summary_path, 'w', encoding='utf-8') as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
-    
+
     print(f"数据库摘要已保存: {summary_path}")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+
 
 def main():
     print("=== 加载 RAG 知识库 ===")
     print(f"数据目录: {RAG_DATA_DIR}")
     print(f"Chroma 数据库目录: {CHROMA_DB_DIR}")
-    
+
     documents = load_markdown_files()
     print(f"\n找到 {len(documents)} 个文档")
-    
+
     if not documents:
         print("没有找到文档，请先运行爬虫脚本")
         return
-    
+
     print("\n初始化 text2vec 模型...")
     print("\n初始化 Chroma 向量数据库...")
     init_chroma_db(documents)
-    
+
     print("\n=== 知识库加载完成 ===")
+
 
 if __name__ == '__main__':
     main()

@@ -4,6 +4,8 @@ volumes:
   db_vol:
   redis_vol:
   media_vol:
+  insightface_vol:
+  huggingface_vol:
 
 networks:
   nginx_network:
@@ -68,6 +70,8 @@ services:
     volumes:
       - ./kdx-ws-be/app:/app/app
       - ./kdx-ws-be/scripts:/app/scripts
+      - ./kdx-ws-be/data/models/buffalo_l:/home/appuser/.insightface/models/buffalo_l
+      - huggingface_vol:/home/appuser/.cache/huggingface
     networks:
       - nginx_network
       - db_network

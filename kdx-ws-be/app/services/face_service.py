@@ -4,12 +4,11 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from datetime import datetime
 from loguru import logger
-
-import cv2
 import numpy as np
 from scipy.spatial.distance import cosine
 
 try:
+    import cv2
     from insightface.app import FaceAnalysis
     INSIGHTFACE_AVAILABLE = True
 except ImportError:
