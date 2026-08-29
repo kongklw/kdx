@@ -22,6 +22,7 @@ from .api.access_stats import create_access_stats_router
 from .ws.voice_agent import create_voice_agent_router
 from .ws.voice_agent_langchain import create_voice_agent_langchain_router
 from .ws.rag_query import create_rag_query_router
+from .ws.baby_assistant import create_baby_assistant_router
 
 settings = get_settings()
 
@@ -37,3 +38,4 @@ app.include_router(create_access_stats_router(settings))
 app.include_router(create_voice_agent_router(settings))
 app.include_router(create_voice_agent_langchain_router(settings))
 app.include_router(create_rag_query_router(settings))
+app.include_router(create_baby_assistant_router(settings))

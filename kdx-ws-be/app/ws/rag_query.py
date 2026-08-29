@@ -11,10 +11,30 @@ from loguru import logger
 from ..core.config import Settings
 from ..core.security import extract_token_from_headers, extract_token_from_cookie, verify_jwt
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage
-from langgraph.graph import StateGraph
 from typing import TypedDict
+# from langchain_openai import ChatOpenAI
+# from langchain_core.messages import HumanMessage
+# from langgraph.graph import StateGraph
+
+_lc_modules = {}
+_lc_initialized = False
+
+
+def _init_langchain():
+    global _lc_initialized, _lc_modules
+    if _lc_initialized:
+        return _lc_modules
+
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import HumanMessage
+    from langgraph.graph import StateGraph
+
+    _lc_modules["ChatOpenAI"] = ChatOpenAI
+    _lc_modules["HumanMessage"] = HumanMessage
+    _lc_modules["StateGraph"] = StateGraph
+    _lc_initialized = True
+    return _lc_modules
+
 
 _embedding_function = None
 _chroma_client = None
@@ -122,11 +142,10 @@ async def retrieve_node(state: RAGState, ws: WebSocket) -> RAGState:
         "documents": docs_info
     })
 
-    return {
-        **state,
-        "documents": results,
-        "sources": sources
-    }
+    return {**state,
+            "documents": results,
+            "sources": sources
+            }
 
 
 async def generate_node(state: RAGState, ws: WebSocket) -> RAGState:
@@ -140,6 +159,10 @@ async def generate_node(state: RAGState, ws: WebSocket) -> RAGState:
     await send_ws_event(ws, "prompt_generated", {
         "prompt_length": len(prompt)
     })
+
+    lc = _init_langchain()
+    ChatOpenAI = lc["ChatOpenAI"]
+    HumanMessage = lc["HumanMessage"]
 
     api_key = os.getenv("DASHSCOPE_API_KEY")
     model = ChatOpenAI(
@@ -172,6 +195,11 @@ async def generate_node(state: RAGState, ws: WebSocket) -> RAGState:
 
 
 def create_rag_graph(ws: WebSocket):
+    logger.info(f"before init lc")
+    lc = _init_langchain()
+    logger.info(f"already init lc")
+
+    StateGraph = lc["StateGraph"]
     workflow = StateGraph(RAGState)
 
     async def retrieve_with_ws(state: RAGState) -> RAGState:
@@ -250,11 +278,15 @@ async def rag_query_websocket(
                 logger.error(f"Failed to parse message: {e}")
 
     async def process_query(query: str):
+        logger.info(f"[STEP 1] Before send_ws_event")
         await send_ws_event(ws, "query_start", {"query": query})
 
         try:
+            logger.info(f"[STEP 2] After send_ws_event, before create_rag_graph")
             graph = create_rag_graph(ws)
+            logger.info(f"[STEP 3] After create_rag_graph")
             result = await graph.ainvoke({"query": query})
+            logger.info(f"[STEP 4] After graph.ainvoke")
 
             await send_ws_event(ws, "query_done", {
                 "query": query,

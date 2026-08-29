@@ -5,15 +5,28 @@ from typing import Optional, Tuple, List, Dict
 from datetime import datetime
 from loguru import logger
 import numpy as np
-from scipy.spatial.distance import cosine
 
 try:
     import cv2
     from insightface.app import FaceAnalysis
     INSIGHTFACE_AVAILABLE = True
-except ImportError:
+except Exception:
     INSIGHTFACE_AVAILABLE = False
     logger.warning("InsightFace not installed, face recognition will be disabled")
+
+
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    try:
+        from scipy.spatial.distance import cosine
+        return 1 - cosine(a, b)
+    except Exception:
+        a = np.asarray(a)
+        b = np.asarray(b)
+        norm_a = np.linalg.norm(a)
+        norm_b = np.linalg.norm(b)
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return float(np.dot(a, b) / (norm_a * norm_b))
 
 
 class FaceService:
@@ -21,19 +34,33 @@ class FaceService:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         
-        # 初始化 InsightFace
+        # 延迟初始化 InsightFace
         self.face_app = None
-        if INSIGHTFACE_AVAILABLE:
-            try:
-                self.face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
-                self.face_app.prepare(ctx_id=-1, det_size=(640, 640))
-                logger.info("InsightFace initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize InsightFace: {e}")
+        self._insightface_initialized = False
         
         # 人脸特征存储
         self.features: Dict[str, np.ndarray] = {}
         self.load_features()
+    
+    def _ensure_insightface(self):
+        """延迟初始化 InsightFace"""
+        if self._insightface_initialized:
+            return self.face_app
+        
+        if not INSIGHTFACE_AVAILABLE:
+            return None
+        
+        try:
+            logger.info("Initializing InsightFace (lazy loading)...")
+            self.face_app = FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+            self.face_app.prepare(ctx_id=-1, det_size=(640, 640))
+            self._insightface_initialized = True
+            logger.info("InsightFace initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize InsightFace: {e}")
+            self.face_app = None
+        
+        return self.face_app
     
     def load_features(self):
         """加载已保存的人脸特征"""
@@ -60,7 +87,8 @@ class FaceService:
     
     def detect_faces(self, image_data: bytes) -> Tuple[bool, List[dict]]:
         """检测图片中的人脸"""
-        if not self.face_app:
+        face_app = self._ensure_insightface()
+        if not face_app:
             return False, []
         
         try:
@@ -70,7 +98,7 @@ class FaceService:
             if img is None:
                 return False, []
             
-            faces = self.face_app.get(img)
+            faces = face_app.get(img)
             result = []
             
             for face in faces:
@@ -88,7 +116,8 @@ class FaceService:
     
     def extract_feature(self, image_data: bytes) -> Optional[np.ndarray]:
         """提取人脸特征"""
-        if not self.face_app:
+        face_app = self._ensure_insightface()
+        if not face_app:
             return None
         
         try:
@@ -98,7 +127,7 @@ class FaceService:
             if img is None:
                 return None
             
-            faces = self.face_app.get(img)
+            faces = face_app.get(img)
             if len(faces) == 0:
                 return None
             
@@ -111,7 +140,8 @@ class FaceService:
     
     def upload_face(self, user_id: str, image_data: bytes) -> Tuple[bool, str, Optional[str]]:
         """上传用户人脸照片"""
-        if not self.face_app:
+        face_app = self._ensure_insightface()
+        if not face_app:
             return False, "人脸识别服务未初始化", None
         
         embedding = self.extract_feature(image_data)
@@ -165,7 +195,8 @@ class FaceService:
     
     def match_face(self, user_id: str, image_data: bytes) -> Tuple[bool, float, str]:
         """识别人脸是否匹配"""
-        if not self.face_app:
+        face_app = self._ensure_insightface()
+        if not face_app:
             return False, 0.0, "人脸识别服务未初始化"
         
         if user_id not in self.features:
@@ -175,9 +206,8 @@ class FaceService:
         if embedding is None:
             return False, 0.0, "未检测到人脸"
         
-        # 计算相似度
         stored_embedding = self.features[user_id]
-        similarity = 1 - cosine(embedding, stored_embedding)
+        similarity = _cosine_similarity(embedding, stored_embedding)
         
         # 阈值判断
         threshold = 0.5

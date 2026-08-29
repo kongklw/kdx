@@ -25,39 +25,11 @@ from ..utils.event import (
 )
 from ..utils.merge_things import merge_async_iters
 
-from langchain_core.runnables import RunnableGenerator
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, AIMessageChunk, ToolMessage
-from langchain_core.tools import tool
-from langgraph.checkpoint.memory import MemorySaver as InMemorySaver
+_lc_initialized = False
+_lc_modules = {}
 
-try:
-    from langgraph.prebuilt import create_react_agent
-except Exception:
-    create_react_agent = None
-try:
-    from langchain.agents import create_agent
-except Exception:
-    create_agent = None
-
-# from dotenv import load_dotenv
-# load_dotenv()
-
-
-@tool
-def add_to_order(item: str, quantity: int) -> str:
-    """Add an item to the customer's sandwich order."""
-    return f"Added {quantity} x {item} to the order."
-
-
-@tool
-def confirm_order(order_summary: str) -> str:
-    """Confirm the final order with the customer."""
-    return f"Order confirmed: {order_summary}. Sending to kitchen."
-
-
-system_prompt = """
+_system_prompt = """
 You are a helpful sandwich shop assistant. Your goal is to take the user's order.
 Be concise and friendly.
 
@@ -66,17 +38,109 @@ Available meats: turkey, ham, roast beef.
 Available cheeses: swiss, cheddar, provolone.
 """
 
-llm_model_name = os.getenv("VOICE_LC_LLM_MODEL") or "qwen3.5-plus"
-api_key = os.getenv("DASHSCOPE_API_KEY")
-debug_ws = (os.getenv("VOICE_LC_DEBUG_WS") or "").lower() in {"1", "true", "yes"}
-llm_model = ChatOpenAI(
-    # model="qwen-vl-max-latest",
-    model=llm_model_name,
-    api_key=api_key,
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-    temperature=0,
-    streaming=True
-)
+_llm_model_name = os.getenv("VOICE_LC_LLM_MODEL") or "qwen3.5-plus"
+_api_key = os.getenv("DASHSCOPE_API_KEY")
+
+
+def _init_langchain():
+    global _lc_initialized, _lc_modules
+    if _lc_initialized:
+        return _lc_modules
+
+    try:
+        from langchain_core.runnables import RunnableGenerator
+        from langchain_openai import ChatOpenAI
+        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, AIMessageChunk, ToolMessage
+        from langchain_core.tools import tool
+        from langgraph.checkpoint.memory import MemorySaver as InMemorySaver
+
+        _lc_modules["RunnableGenerator"] = RunnableGenerator
+        _lc_modules["ChatOpenAI"] = ChatOpenAI
+        _lc_modules["HumanMessage"] = HumanMessage
+        _lc_modules["SystemMessage"] = SystemMessage
+        _lc_modules["AIMessage"] = AIMessage
+        _lc_modules["AIMessageChunk"] = AIMessageChunk
+        _lc_modules["ToolMessage"] = ToolMessage
+        _lc_modules["tool"] = tool
+        _lc_modules["InMemorySaver"] = InMemorySaver
+
+        try:
+            from langgraph.prebuilt import create_react_agent
+            _lc_modules["create_react_agent"] = create_react_agent
+        except Exception:
+            _lc_modules["create_react_agent"] = None
+
+        try:
+            from langchain.agents import create_agent
+            _lc_modules["create_agent"] = create_agent
+        except Exception:
+            _lc_modules["create_agent"] = None
+
+        _lc_initialized = True
+        logger.info("LangChain modules initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize LangChain modules: {e}")
+        raise
+
+    return _lc_modules
+
+
+def _build_tools():
+    tool = _lc_modules["tool"]
+
+    @tool
+    def add_to_order(item: str, quantity: int) -> str:
+        """Add an item to the customer's sandwich order."""
+        return f"Added {quantity} x {item} to the order."
+
+    @tool
+    def confirm_order(order_summary: str) -> str:
+        """Confirm the final order with the customer."""
+        return f"Order confirmed: {order_summary}. Sending to kitchen."
+
+    return [add_to_order, confirm_order]
+
+
+def _build_llm_model():
+    ChatOpenAI = _lc_modules["ChatOpenAI"]
+    return ChatOpenAI(
+        model=_llm_model_name,
+        api_key=_api_key,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        temperature=0,
+        streaming=True
+    )
+
+
+def _build_agent(llm_model, tools):
+    InMemorySaver = _lc_modules["InMemorySaver"]
+    create_agent = _lc_modules.get("create_agent")
+    create_react_agent = _lc_modules.get("create_react_agent")
+
+    agent = None
+    if create_agent is not None:
+        try:
+            agent = create_agent(
+                model=llm_model,
+                tools=tools,
+                system_prompt=_system_prompt,
+                checkpointer=InMemorySaver(),
+            )
+        except Exception:
+            agent = None
+
+    if agent is None and create_react_agent is not None:
+        try:
+            agent = create_react_agent(
+                llm_model,
+                tools=tools,
+                checkpointer=InMemorySaver(),
+                state_modifier=_system_prompt,
+            )
+        except Exception:
+            agent = None
+
+    return agent
 
 
 class DashscopeRealtimeASR:
@@ -181,7 +245,6 @@ class DashscopeRealtimeASR:
                     self._started.set()
                     error_code = header.get("error_code")
                     error_message = header.get("error_message") or "dashscope asr task failed"
-                    # NO_VALID_AUDIO_ERROR is expected when user opens/closes without speaking
                     if error_code == "NO_VALID_AUDIO_ERROR":
                         logger.info(f"DashScope ASR task failed due to no audio: {error_message}")
                         self._finished = True
@@ -236,10 +299,8 @@ class DashscopeRealtimeASR:
         if self._closed or self._finished:
             return
         self._finished = True
-        # Only send finish instruction if we actually connected to ASR service
         ws = self._ws
         if ws is None:
-            # Never connected, just clean up
             await self._queue.put(self._close_sentinel)
             return
         with contextlib.suppress(Exception):
@@ -252,7 +313,7 @@ class DashscopeRealtimeASR:
             item = await self._queue.get()
             if item is self._close_sentinel:
                 return
-            yield item  # type: ignore[misc]
+            yield item
 
     async def close(self) -> None:
         self._closed = True
@@ -395,7 +456,7 @@ class DashscopeQwenTtsRealtime:
             item = await self._queue.get()
             if item is self._close_sentinel:
                 return
-            yield item  # type: ignore[misc]
+            yield item
 
     async def close(self) -> None:
         self._closed = True
@@ -426,30 +487,6 @@ def _split_tts_chunk_events(audio: bytes) -> list[TTSChunkEvent]:
     ]
 
 
-agent = None
-if create_agent is not None:
-    try:
-        agent = create_agent(
-            model=llm_model,
-            tools=[add_to_order, confirm_order],
-            system_prompt=system_prompt,
-            checkpointer=InMemorySaver(),
-        )
-    except Exception:
-        agent = None
-
-if agent is None and create_react_agent is not None:
-    try:
-        agent = create_react_agent(
-            llm_model,
-            tools=[add_to_order, confirm_order],
-            checkpointer=InMemorySaver(),
-            state_modifier=system_prompt,
-        )
-    except Exception:
-        agent = None
-
-
 def _as_json(text: str) -> Optional[Dict[str, Any]]:
     try:
         value = json.loads(text)
@@ -461,26 +498,6 @@ def _as_json(text: str) -> Optional[Dict[str, Any]]:
 
 
 async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[VoiceAgentEvent]:
-    """
-    Transform stream: Audio (Bytes) → Voice Events (VoiceAgentEvent)
-
-    This function takes a stream of audio chunks and sends them to DashScope for STT.
-
-    It uses a producer-consumer pattern where:
-    - Producer: A background task reads audio chunks from audio_stream and sends
-      them to AssemblyAI via WebSocket. This runs concurrently with the consumer,
-      allowing transcription to begin before all audio has arrived.
-    - Consumer: The main coroutine receives transcription events from AssemblyAI
-      and yields them downstream. Events include both partial results (stt_chunk)
-      and final transcripts (stt_output).
-
-    Args:
-        audio_stream: Async iterator of PCM audio bytes (16-bit, mono, 16kHz)
-
-    Yields:
-        STT events (stt_chunk for partials, stt_output for final transcripts)
-    """
-    # stt_model_name = os.getenv("VOICE_LC_STT_MODEL") or "paraformer-realtime-v2"
     stt_model_name = os.getenv("VOICE_LC_STT_MODEL") or "paraformer-realtime-v2"
     stt_url = os.getenv("VOICE_LC_STT_URL") or "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
     stt_language = os.getenv("VOICE_LC_STT_LANGUAGE") or "zh"
@@ -493,7 +510,7 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
         stt_sample_rate = 8000
 
     stt = DashscopeRealtimeASR(
-        api_key=api_key,
+        api_key=_api_key,
         model=stt_model_name,
         url=stt_url,
         sample_rate=stt_sample_rate,
@@ -505,12 +522,9 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
     async def send_audio():
         try:
             async for audio_chunk in audio_stream:
-                print(f'4 send audio chunk bytes: {len(audio_chunk)}')
                 logger.info("stt.send_audio bytes=%s", len(audio_chunk))
                 await stt.send_audio(audio_chunk)
-
         finally:
-            print('1.1 已经结束对audio_stream的处理')
             with contextlib.suppress(Exception):
                 await stt.finish()
             with contextlib.suppress(Exception):
@@ -520,11 +534,9 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
 
     try:
         async for event in stt.receive_events():
-            print(f'1.2 receive event: {event}')
             logger.info("stt.event type=%s", getattr(event, "type", None))
             yield event
     finally:
-        print(f'1.3 处理完结束receive event')
         with contextlib.suppress(asyncio.CancelledError):
             send_task.cancel()
             await send_task
@@ -533,32 +545,19 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes]) -> AsyncIterator[Voice
 
 
 async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
-    """
-      Transform stream: Voice Events → Voice Events (with Agent Responses)
+    lc = _init_langchain()
+    HumanMessage = lc["HumanMessage"]
+    SystemMessage = lc["SystemMessage"]
+    AIMessage = lc["AIMessage"]
+    AIMessageChunk = lc["AIMessageChunk"]
+    ToolMessage = lc["ToolMessage"]
 
-      This function takes a stream of upstream voice agent events and processes them.
-      When an stt_output event arrives, it passes the transcript to the LangChain agent.
-      The agent streams back its response tokens as agent_chunk events.
-      Tool calls and results are also emitted as separate events.
-      All other upstream events are passed through unchanged.
+    llm_model = _build_llm_model()
+    tools = _build_tools()
+    agent = _build_agent(llm_model, tools)
 
-      The passthrough pattern ensures downstream stages (like TTS) can observe all
-      events in the pipeline, not just the ones this stage produces. This enables
-      features like displaying partial transcripts while the agent is thinking.
-
-      Args:
-          event_stream: An async iterator of upstream voice agent events
-
-      Yields:
-          All upstream events plus agent_chunk, tool_call, and tool_result events
-      """
-
-    # Generate a unique thread ID for this conversation session
-    # This allows the agent to maintain conversation context across multiple turns
-    # using the checkpointer (InMemorySaver) configured in the agent
     thread_id = str(uuid4())
     async for event in event_stream:
-        # Pass through all events to downstream consumers
         yield event
         logger.info(f'agent stream event --> {event}')
         if event.type == 'stt_output':
@@ -570,17 +569,14 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
                 )
 
                 async for message, metadata in stream:
-                    print(f'2.1 message {message} and meta_data {metadata}')
-                    # Handle both AIMessage and AIMessageChunk types
                     if isinstance(message, (AIMessage, AIMessageChunk)):
-                        # Handle both method and property access patterns for LangChain compatibility
                         if hasattr(message, 'content'):
                             text = message.content
                         elif callable(message.text):
                             text = message.text()
                         else:
                             text = message.text
-                        if text:  # Only yield if there's actual content
+                        if text:
                             yield AgentChunkEvent.create(text)
 
                         if hasattr(message, 'tool_calls') and message.tool_calls:
@@ -600,7 +596,7 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
             else:
                 async for chunk in llm_model.astream(
                         [
-                            SystemMessage(content=system_prompt),
+                            SystemMessage(content=_system_prompt),
                             HumanMessage(content=event.transcript),
                         ]
                 ):
@@ -612,35 +608,11 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
 async def _tts_stream(
         event_stream: AsyncIterator[VoiceAgentEvent],
 ) -> AsyncIterator[VoiceAgentEvent]:
-    """
-    Transform stream: Voice Events → Voice Events (with Audio)
-
-    This function takes a stream of upstream voice agent events and processes them.
-    When agent_chunk events arrive, it sends the text to Cartesia for TTS synthesis.
-    Audio is streamed back as tts_chunk events as it's generated.
-    All upstream events are passed through unchanged.
-
-    It uses merge_async_iters to combine two concurrent streams:
-    - process_upstream(): Iterates through incoming events, yields them for
-      passthrough, and sends agent text chunks to Cartesia for synthesis.
-    - tts.receive_events(): Yields audio chunks from Cartesia as they are
-      synthesized.
-
-    The merge utility runs both iterators concurrently, yielding items from
-    either stream as they become available. This allows audio generation to
-    begin before the agent has finished generating all text, minimizing latency.
-
-    Args:
-        event_stream: An async iterator of upstream voice agent events
-
-    Yields:
-        All upstream events plus tts_chunk events for synthesized audio
-    """
     tts_model_name = os.getenv("VOICE_LC_TTS_MODEL") or "qwen3-tts-vd-2026-01-26"
     tts_voice = os.getenv("VOICE_LC_TTS_VOICE") or "Cherry"
     tts_url = os.getenv("VOICE_LC_TTS_URL") or "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
     tts = DashscopeQwenTtsRealtime(
-        api_key=api_key,
+        api_key=_api_key,
         model=tts_model_name,
         voice=tts_voice,
         url=tts_url,
@@ -648,42 +620,20 @@ async def _tts_stream(
     )
 
     async def process_upstream() -> AsyncIterator[VoiceAgentEvent]:
-        """
-        Process upstream events, yielding them while sending text to Cartesia.
-
-        This async generator serves two purposes:
-        1. Pass through all upstream events (stt_chunk, stt_output, agent_chunk)
-           so downstream consumers can observe the full event stream.
-        2. Buffer agent_chunk text and send to Cartesia when agent_end arrives.
-           This ensures the full response is sent at once for better TTS quality.
-        """
         buffer: list[str] = []
         async for event in event_stream:
-            # Pass through all events to downstream consumers
             yield event
-            # Buffer agent text chunks
             if event.type == "agent_chunk":
                 buffer.append(event.text)
-            # Send all buffered text to Cartesia when agent finishes
             if event.type == "agent_end":
                 await tts.send_text("".join(buffer))
                 buffer = []
 
     try:
-        # Merge the processed upstream events with TTS audio events
-        # Both streams run concurrently, yielding events as they arrive
         async for event in merge_async_iters(process_upstream(), tts.receive_events()):
             yield event
     finally:
-        # Cleanup: close the WebSocket connection to Cartesia
         await tts.close()
-
-
-pipeline = (
-        RunnableGenerator(_stt_stream)  # Audio -> STT events
-        | RunnableGenerator(_agent_stream)  # STT events -> STT + Agent events
-        | RunnableGenerator(_tts_stream)  # STT + Agent events -> All events
-)
 
 
 async def voice_agent_langchain(
@@ -691,28 +641,22 @@ async def voice_agent_langchain(
         settings: Settings,
 ) -> None:
     user: Optional[Dict[str, Any]] = None
-    
-    # 标准认证流程：从多个来源获取 token
-    # 优先级: URL参数 > Authorization header > Cookie
+
     token: Optional[str] = None
-    
-    # 1. 从 URL 参数获取 token
+
     token = ws.query_params.get("token")
-    
-    # 2. 从 Authorization header 获取 token (Bearer token)
+
     if not token:
         token = extract_token_from_headers(ws.headers.get("authorization"))
-    
-    # 3. 从 Cookie 获取 token (Admin-Token)
+
     if not token:
         token = extract_token_from_cookie(ws.headers.get("cookie"))
-    
-    # 验证 token（生产环境必须验证，不允许匿名连接）
+
     if not token:
         await ws.close(code=4401, reason="missing token: token is required for WebSocket connection")
         logger.warning("WebSocket connection rejected: no token provided")
         return
-    
+
     try:
         user = verify_jwt(token, settings)
         logger.info(f"WebSocket authenticated user: {user.get('user_id')}")
@@ -730,54 +674,42 @@ async def voice_agent_langchain(
         }
     )
 
-    async def websocket_audio_stream() -> AsyncIterator[bytes]:
-        while True:
-            message = await ws.receive()
-            print(f'receive messages are {message}')
-            msg_type = message.get("type")
-            has_bytes = message.get("bytes") is not None
-            text = message.get("text")
-            logger.info("ws.receive type=%s bytes=%s text=%s", msg_type, has_bytes,
-                        (text[:120] if isinstance(text, str) else None))
-            msg_type = message.get("type")
-            if msg_type == "websocket.disconnect":
-                break
-            if msg_type != "websocket.receive":
-                continue
-            data = message.get("bytes")
-            if data is not None:
-                print(f'7 data is not none: {data}')
-                yield data
-                continue
-            text = message.get("text")
-            print(f'8 text: {text}')
-            if text is None:
-                continue
-            payload = _as_json(text)
-            print(f'9 payload: {payload}')
-            if payload and payload.get("type") == "ping":
-                try:
-                    await ws.send_json({"type": "pong"})
-                except Exception:
-                    return
-
     try:
-        '''
-        在 LangChain 中，所有可运行的组件（如 LLM、Prompt、Parser、Custom Runnable 等）都实现了 Runnable 接口。这个接口定义了一系列标准方法，包括：
-        invoke / ainvoke：单次调用
-        batch / abatch：批量调用
-        stream / astream：流式输出
-        transform / atransform‌：‌流式转换‌，即接收一个异步迭代器（Async Iterator），处理其中的每个元素，并返回一个新的异步迭代器。
-        因此，pipeline.atransform 是 Runnable 基类提供的一个原生异步方法，用于处理流式数据管道。
-        
-        '''
+        lc = _init_langchain()
+        RunnableGenerator = lc["RunnableGenerator"]
+
+        pipeline = (
+            RunnableGenerator(_stt_stream)
+            | RunnableGenerator(_agent_stream)
+            | RunnableGenerator(_tts_stream)
+        )
+
+        async def websocket_audio_stream() -> AsyncIterator[bytes]:
+            while True:
+                message = await ws.receive()
+                msg_type = message.get("type")
+                if msg_type == "websocket.disconnect":
+                    break
+                if msg_type != "websocket.receive":
+                    continue
+                data = message.get("bytes")
+                if data is not None:
+                    yield data
+                    continue
+                text = message.get("text")
+                if text is None:
+                    continue
+                payload = _as_json(text)
+                if payload and payload.get("type") == "ping":
+                    try:
+                        await ws.send_json({"type": "pong"})
+                    except Exception:
+                        return
+
         output_stream = pipeline.atransform(websocket_audio_stream())
 
-        # Process all events from the pipeline, sending events back to the client
         async for event in output_stream:
-            print(f'6 output_stream events are {event}')
             data = event_to_dict(event)
-            print(f'7 event to dict data is {data}')
             await ws.send_json(data)
     except WebSocketDisconnect:
         return

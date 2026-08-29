@@ -121,17 +121,16 @@ class BabyInfoSerializer(serializers.ModelSerializer):
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if bucket:
-                s3 = _get_s3_client()
                 try:
+                    s3 = _get_s3_client()
                     url = s3.generate_presigned_url(
                         ClientMethod='get_object',
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将内部地址转换为外部地址
                     url = _minio_url_to_proxy(url)
                     return url
-                except Exception as e:
+                except Exception:
                     pass
         return key.lstrip('/') if key else ''
 
@@ -332,14 +331,13 @@ class GrowthRecordSerializer(serializers.ModelSerializer):
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if bucket:
-                s3 = _get_s3_client()
                 try:
+                    s3 = _get_s3_client()
                     url = s3.generate_presigned_url(
                         ClientMethod='get_object',
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将内部地址转换为外部地址
                     url = _minio_url_to_proxy(url)
                     return url
                 except Exception:
@@ -383,21 +381,24 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if bucket:
-                s3 = _get_s3_client()
-                # 优先返回已生成的缩略图
-                for ext in ['.webp', '.avif', '.jpg']:
-                    thumb_key = f'{base}{ext}'
-                    try:
-                        s3.head_object(Bucket=bucket, Key=thumb_key)
-                        url = s3.generate_presigned_url(
-                            ClientMethod='get_object',
-                            Params={'Bucket': bucket, 'Key': thumb_key},
-                            ExpiresIn=600,
-                        )
-                        url = _minio_url_to_proxy(url)
-                        return url
-                    except Exception:
-                        continue
+                try:
+                    s3 = _get_s3_client()
+                    # 优先返回已生成的缩略图
+                    for ext in ['.webp', '.avif', '.jpg']:
+                        thumb_key = f'{base}{ext}'
+                        try:
+                            s3.head_object(Bucket=bucket, Key=thumb_key)
+                            url = s3.generate_presigned_url(
+                                ClientMethod='get_object',
+                                Params={'Bucket': bucket, 'Key': thumb_key},
+                                ExpiresIn=600,
+                            )
+                            url = _minio_url_to_proxy(url)
+                            return url
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
 
         if not key:
             return f'/file/img?base={quote(base)}'
@@ -432,14 +433,13 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if bucket:
-                s3 = _get_s3_client()
                 try:
+                    s3 = _get_s3_client()
                     url = s3.generate_presigned_url(
                         ClientMethod='get_object',
                         Params={'Bucket': bucket, 'Key': key},
                         ExpiresIn=600,
                     )
-                    # 将内部地址转换为外部地址
                     url = _minio_url_to_proxy(url)
                     return url
                 except Exception:
@@ -459,8 +459,8 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
                 if getattr(settings, 'USE_S3_MEDIA', False):
                     bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
                     if bucket:
-                        s3 = _get_s3_client()
                         try:
+                            s3 = _get_s3_client()
                             url = s3.generate_presigned_url(
                                 ClientMethod='get_object',
                                 Params={'Bucket': bucket, 'Key': key},
@@ -483,8 +483,8 @@ class AlbumPhotoSerializer(serializers.ModelSerializer):
         if getattr(settings, 'USE_S3_MEDIA', False):
             bucket = getattr(settings, 'AWS_STORAGE_BUCKET_NAME', None)
             if bucket:
-                s3 = _get_s3_client()
                 try:
+                    s3 = _get_s3_client()
                     s3.head_object(Bucket=bucket, Key=poster_key)
                     url = s3.generate_presigned_url(
                         ClientMethod='get_object',

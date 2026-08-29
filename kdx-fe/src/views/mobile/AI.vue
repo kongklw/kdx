@@ -3,6 +3,18 @@
     <van-nav-bar title="AI Park" fixed placeholder />
 
     <van-grid :column-num="2" :gutter="10" clickable class="ai-grid">
+      <van-grid-item text="Baby Assistant" @click="openAssistant">
+        <template #icon>
+          <svg viewBox="0 0 48 48" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="8" y="14" width="32" height="24" rx="6" fill="#6366f1" />
+            <rect x="17" y="4" width="4" height="12" rx="2" fill="#6366f1" />
+            <circle cx="19" cy="7" r="3" fill="#fcd34d" />
+            <circle cx="18" cy="25" r="3" fill="#fff" />
+            <circle cx="30" cy="25" r="3" fill="#fff" />
+            <path d="M19 31c2 2 8 2 10 0" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </template>
+      </van-grid-item>
       <van-grid-item icon="chat-o" text="Langchain Chat" to="/mobile/functions/langchain" />
       <van-grid-item text="RAG Knowledge" to="/mobile/functions/ragchat">
         <template #icon>
@@ -296,17 +308,31 @@
         </div>
       </div>
     </van-popup>
+
+    <!-- Baby Assistant (LangGraph) 弹窗 -->
+    <van-popup
+      v-model="showAssistant"
+      position="bottom"
+      round
+      :style="{ height: '85vh' }"
+      class="assistant-popup"
+    >
+      <AssistantChat v-if="showAssistant" @close="showAssistant = false" />
+    </van-popup>
   </div>
 </template>
 
 <script>
 import { Toast } from 'vant'
 import { getToken } from '@/utils/auth'
+import AssistantChat from './components/AssistantChat.vue'
 
 export default {
   name: 'MobileAI',
+  components: { AssistantChat },
   data() {
     return {
+      showAssistant: false,
       showVoiceAssistant: false,
       showWsSettings: false,
       inputMode: 'text',
@@ -415,6 +441,9 @@ export default {
     }
   },
   methods: {
+    openAssistant() {
+      this.showAssistant = true
+    },
     openVoiceAssistant() {
       this.showVoiceAssistant = true
     },
@@ -1472,6 +1501,11 @@ export default {
   display: flex;
   flex-direction: column;
 }
+.assistant-popup {
+  display: flex;
+  flex-direction: column;
+}
+
 .va {
   height: 100%;
   display: flex;

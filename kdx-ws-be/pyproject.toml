@@ -1,33 +1,35 @@
 [project]
 name = "kdx-ws-be"
 version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "konglingwen", email = "" }
+]
 requires-python = ">=3.12"
 dependencies = [
-  "insightface>=0.7",
-  "fastapi==0.115.12",
-  "uvicorn==0.34.0",
-  "python-dotenv==1.0.1",
-  "PyJWT==2.9.0",
-  "redis==5.2.1",
-  "PyMySQL==1.1.1",
-  "websockets>=12,<14",
-  "langchain-openai>=0.2,<0.4",
-  "langchain-core>=0.3,<0.4",
-  "langgraph>=0.2,<0.4",
-  "loguru>=0.7.3",
-  "python-multipart>=0.0.29",
-  "sqlalchemy>=2.0.51",
+    "chromadb>=1.5.9",
+    "deepagents>=0.7.5",
+    "fastapi[standard]>=0.141.1",
+    "insightface>=1.0.1",
+    "jwt>=1.4.0",
+    "langchain>=1.3.14",
+    "langchain-openai>=1.4.3",
+    "langgraph>=1.2.10",
+    "loguru>=0.7.3",
+    "pymysql>=1.2.0",
+    "redis>=8.1.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn>=0.52.1",
 ]
 
+[project.scripts]
+kdx-ws-be = "kdx_ws_be:main"
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [build-system]
-requires = ["setuptools>=69"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
-
-[tool.uv.sources.pypi]
-url = "https://mirrors.aliyun.com/pypi/simple/"
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
