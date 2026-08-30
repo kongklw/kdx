@@ -61,6 +61,7 @@ urlpatterns = [
     path('period/settings', period_views.PeriodSettingsView.as_view()),
 
     path('birthday', views.BirthdayView.as_view()),
+    path('birthday_bazi', views.BirthdayBaziView.as_view()),
     
     # User access statistics
     path('access/stats', access_views.UserAccessStatsView.as_view()),

@@ -491,3 +491,12 @@ export function deleteBirthdayReq(id) {
     data: { id }
   })
 }
+
+// 八字 / 五行测算
+export function getBirthdayBaziReq(params) {
+  return request({
+    url: '/baby/birthday_bazi',
+    method: 'get',
+    params
+  })
+}

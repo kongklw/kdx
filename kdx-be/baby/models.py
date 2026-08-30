@@ -305,6 +305,9 @@ class BirthdayRecord(models.Model):
     lunar_day = models.IntegerField(blank=True, null=True)
     lunar_is_leap = models.BooleanField(default=False)
 
+    birth_hour = models.IntegerField(blank=True, null=True)  # 出生时辰(0-23整点)，选填
+    gender = models.SmallIntegerField(blank=True, null=True)  # 性别 1=男 0=女，选填(排大运需要)
+
     created_at = models.DateField(auto_now_add=True)
     updated_at = models.DateField(auto_now=True)
 

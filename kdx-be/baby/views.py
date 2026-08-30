@@ -438,6 +438,16 @@ class BirthdayView(APIView):
             if solar:
                 data['solar_date'] = solar
 
+        ok, birth_hour = _parse_birth_hour(payload.get('birth_hour'))
+        if not ok:
+            return Response({'code': 400, 'msg': 'birth_hour 参数错误', 'data': None})
+        data['birth_hour'] = birth_hour
+
+        ok, gender = _parse_gender(payload.get('gender'))
+        if not ok:
+            return Response({'code': 400, 'msg': 'gender 参数错误', 'data': None})
+        data['gender'] = gender
+
         record = BirthdayRecord.objects.create(**data)
         return Response({'code': 200, 'msg': 'ok', 'data': _decorate_birthday(record)})
 
@@ -494,6 +504,18 @@ class BirthdayView(APIView):
                 if solar:
                     record.solar_date = solar
 
+        if 'birth_hour' in payload:
+            ok, birth_hour = _parse_birth_hour(payload.get('birth_hour'))
+            if not ok:
+                return Response({'code': 400, 'msg': 'birth_hour 参数错误', 'data': None})
+            record.birth_hour = birth_hour
+
+        if 'gender' in payload:
+            ok, gender = _parse_gender(payload.get('gender'))
+            if not ok:
+                return Response({'code': 400, 'msg': 'gender 参数错误', 'data': None})
+            record.gender = gender
+
         record.save()
         return Response({'code': 200, 'msg': 'ok', 'data': _decorate_birthday(record)})
 
@@ -507,3 +529,225 @@ class BirthdayView(APIView):
             return Response({'code': 404, 'msg': '记录不存在', 'data': None})
         record.delete()
         return Response({'code': 200, 'msg': 'ok', 'data': None})
+
+
+# ──────────────────────────────────────────────
+# 八字 / 五行
+# ──────────────────────────────────────────────
+
+_GAN_WUXING = {
+    '甲': '木', '乙': '木', '丙': '火', '丁': '火', '戊': '土',
+    '己': '土', '庚': '金', '辛': '金', '壬': '水', '癸': '水'
+}
+_ZHI_WUXING = {
+    '子': '水', '丑': '土', '寅': '木', '卯': '木', '辰': '土', '巳': '火',
+    '午': '火', '未': '土', '申': '金', '酉': '金', '戌': '土', '亥': '水'
+}
+_WUXING_ORDER = ['金', '木', '水', '火', '土']
+
+_GAN_YINYANG = {
+    '甲': '阳', '乙': '阴', '丙': '阳', '丁': '阴', '戊': '阳',
+    '己': '阴', '庚': '阳', '辛': '阴', '壬': '阳', '癸': '阴'
+}
+_ZHI_YINYANG = {
+    '子': '阳', '丑': '阴', '寅': '阳', '卯': '阴', '辰': '阳', '巳': '阴',
+    '午': '阳', '未': '阴', '申': '阳', '酉': '阴', '戌': '阳', '亥': '阴'
+}
+# 月支藏干本气十神 → 格局名（比肩/劫财为特殊格局：建禄/月刃）
+_SHISHEN_GEJU = {
+    '比肩': '建禄格', '劫财': '月刃格',
+    '食神': '食神格', '伤官': '伤官格',
+    '偏财': '偏财格', '正财': '正财格',
+    '七杀': '七杀格', '正官': '正官格',
+    '偏印': '偏印格', '正印': '正印格'
+}
+
+
+def _parse_birth_hour(value):
+    """解析出生时辰(0-23整点)，允许 None/空 表示未填。返回 (ok, hour|None)。"""
+    if value in [None, '']:
+        return True, None
+    try:
+        h = int(value)
+    except Exception:
+        return False, None
+    if h < 0 or h > 23:
+        return False, None
+    return True, h
+
+
+def _parse_gender(value):
+    """解析性别(1=男 0=女)，允许 None/空 表示未填。返回 (ok, gender|None)。"""
+    if value in [None, '']:
+        return True, None
+    try:
+        g = int(value)
+    except Exception:
+        return False, None
+    if g not in (0, 1):
+        return False, None
+    return True, g
+
+
+def _build_bazi_payload(record: BirthdayRecord, hour=None, sect=2) -> dict:
+    from lunar_python import Solar
+
+    solar_dt = record.solar_date
+    h = int(hour) if hour is not None else None
+    if h is not None and (h < 0 or h > 23):
+        h = None
+    solar = Solar.fromYmdHms(solar_dt.year, solar_dt.month, solar_dt.day, h if h is not None else 0, 0, 0)
+    lunar = solar.getLunar()
+    ec = lunar.getEightChar()
+    # 子时换日流派: 1=晚子时(23:00起)日柱算明天 2=晚子时日柱算当天(默认)
+    ec.setSect(sect)
+
+    def _pillar(label, key, gan, zhi, nayin, shishen_gan, hide_gan, shishen_zhi, dishi):
+        return {
+            'key': key,
+            'label': label,
+            'ganzhi': f'{gan}{zhi}',
+            'gan': gan,
+            'zhi': zhi,
+            'gan_wuxing': _GAN_WUXING.get(gan, ''),
+            'zhi_wuxing': _ZHI_WUXING.get(zhi, ''),
+            'gan_yinyang': _GAN_YINYANG.get(gan, ''),
+            'zhi_yinyang': _ZHI_YINYANG.get(zhi, ''),
+            'gan_shishen': shishen_gan,
+            'zhi_hide_gan': hide_gan,
+            'zhi_shishen_benqi': shishen_zhi,
+            'dishi': dishi,
+            'nayin': nayin
+        }
+
+    pillars = [
+        _pillar('年柱', 'year', ec.getYearGan(), ec.getYearZhi(), ec.getYearNaYin(),
+                ec.getYearShiShenGan(), ''.join(ec.getYearHideGan()), (ec.getYearShiShenZhi() or [''])[0], ec.getYearDiShi()),
+        _pillar('月柱', 'month', ec.getMonthGan(), ec.getMonthZhi(), ec.getMonthNaYin(),
+                ec.getMonthShiShenGan(), ''.join(ec.getMonthHideGan()), (ec.getMonthShiShenZhi() or [''])[0], ec.getMonthDiShi()),
+        _pillar('日柱', 'day', ec.getDayGan(), ec.getDayZhi(), ec.getDayNaYin(),
+                ec.getDayShiShenGan(), ''.join(ec.getDayHideGan()), (ec.getDayShiShenZhi() or [''])[0], ec.getDayDiShi())
+    ]
+    if h is not None:
+        pillars.append(_pillar('时柱', 'time', ec.getTimeGan(), ec.getTimeZhi(), ec.getTimeNaYin(),
+                               ec.getTimeShiShenGan(), ''.join(ec.getTimeHideGan()), (ec.getTimeShiShenZhi() or [''])[0], ec.getTimeDiShi()))
+    else:
+        pillars.append({'key': 'time', 'label': '时柱', 'ganzhi': None, 'gan': None, 'zhi': None,
+                        'gan_wuxing': None, 'zhi_wuxing': None, 'gan_yinyang': None, 'zhi_yinyang': None,
+                        'gan_shishen': None, 'zhi_hide_gan': None, 'zhi_shishen_benqi': None,
+                        'dishi': None, 'nayin': None})
+
+    count = {k: 0 for k in _WUXING_ORDER}
+    for p in pillars:
+        for wx in (p.get('gan_wuxing'), p.get('zhi_wuxing')):
+            if wx in count:
+                count[wx] += 1
+
+    missing = [k for k in _WUXING_ORDER if count[k] == 0]
+    strongest = max(_WUXING_ORDER, key=lambda k: count[k]) if any(count.values()) else None
+
+    leap_txt = '闰' if record.lunar_is_leap else ''
+    lunar_text = f"{lunar.getYearInChinese()}年{leap_txt}{lunar.getMonthInChinese()}月{lunar.getDayInChinese()}"
+
+    year_nayin = ec.getYearNaYin()
+    day_gan = ec.getDayGan()
+    # 格局：以月支藏干本气十神定格
+    month_benqi_shishen = (ec.getMonthShiShenZhi() or [''])[0]
+
+    # 大运流年：需要性别(阳男阴女顺排、阴男阳女逆排)
+    yun_info = None
+    if record.gender in (0, 1):
+        yun = ec.getYun(1 if record.gender == 1 else 0)
+        dayuns = []
+        for dy in yun.getDaYun():
+            liunian = [
+                {'year': x.getYear(), 'age': x.getAge(), 'ganzhi': x.getGanZhi()}
+                for x in (dy.getLiuNian() or [])
+            ]
+            dayuns.append({
+                'ganzhi': dy.getGanZhi() or None,  # 第一步为起运前，无干支
+                'start_year': dy.getStartYear(),
+                'end_year': dy.getEndYear(),
+                'start_age': dy.getStartAge(),
+                'end_age': dy.getEndAge(),
+                'liunian': liunian
+            })
+        start_solar = yun.getStartSolar()
+        yun_info = {
+            'gender': record.gender,
+            'start_text': f"{yun.getStartYear()}年{yun.getStartMonth()}个月{yun.getStartDay()}天",
+            'start_solar': start_solar.toYmd() if start_solar else None,
+            'dayuns': dayuns
+        }
+
+    return {
+        'name': record.name,
+        'solar_date': solar_dt.isoformat(),
+        'lunar_text': lunar_text,
+        'lunar_is_leap': bool(record.lunar_is_leap),
+        'year_ganzhi': ec.getYearGan() + ec.getYearZhi(),
+        'zodiac': lunar.getYearShengXiao(),
+        'year_nayin': year_nayin,
+        'life_element': year_nayin[-1] if year_nayin else None,
+        'hour': h,
+        'pillars': pillars,
+        'wuxing_count': count,
+        'missing_wuxing': missing,
+        'strongest_wuxing': strongest,
+        'count_basis': 8 if h is not None else 6,
+        'geju': _SHISHEN_GEJU.get(month_benqi_shishen),
+        'geju_shishen': month_benqi_shishen,
+        'taiyuan': ec.getTaiYuan(),
+        'minggong': ec.getMingGong(),
+        'shengong': ec.getShenGong(),
+        'xunkong': ''.join(ec.getDayXunKong()),
+        'rizhu': {
+            'gan': day_gan,
+            'yinyang': _GAN_YINYANG.get(day_gan, ''),
+            'wuxing': _GAN_WUXING.get(day_gan, ''),
+            'nayin': ec.getDayNaYin()
+        },
+        'sect': sect,
+        'yun': yun_info
+    }
+
+
+class BirthdayBaziView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        payload = request.query_params
+        rid = payload.get('id')
+        if not rid:
+            return Response({'code': 400, 'msg': 'id 必填', 'data': None})
+        record = BirthdayRecord.objects.filter(user=request.user, id=rid).first()
+        if not record:
+            return Response({'code': 404, 'msg': '记录不存在', 'data': None})
+
+        _ensure_birthday_both_calendars(record)
+        if not record.solar_date:
+            return Response({'code': 400, 'msg': '生日日期缺失，无法测算八字', 'data': None})
+
+        hour = record.birth_hour
+        if payload.get('hour') not in [None, '']:
+            try:
+                hour = int(payload.get('hour'))
+            except Exception:
+                return Response({'code': 400, 'msg': 'hour 参数错误', 'data': None})
+
+        # 子时换日流派: 1=晚子时(23:00起)算明天 2=晚子时算当天(默认)
+        sect = 2
+        if payload.get('sect') not in [None, '']:
+            try:
+                sect = int(payload.get('sect'))
+            except Exception:
+                return Response({'code': 400, 'msg': 'sect 参数错误', 'data': None})
+            if sect not in (1, 2):
+                return Response({'code': 400, 'msg': 'sect 参数错误', 'data': None})
+
+        try:
+            data = _build_bazi_payload(record, hour=hour, sect=sect)
+        except Exception as e:
+            logger.exception('bazi calc failed: %s', e)
+            return Response({'code': 500, 'msg': '八字测算失败，请稍后重试', 'data': None})
+        return Response({'code': 200, 'msg': 'ok', 'data': data})

@@ -22,6 +22,7 @@
                       <span v-if="item.relation" class="chip chip-muted">{{ item.relation }}</span>
                       <span class="chip chip-accent">{{ item.constellation || '-' }}</span>
                       <span v-if="item.age_text" class="chip chip-strong">{{ item.age_text }}</span>
+                      <span class="chip chip-bazi" @click.stop="openBazi(item)">八字</span>
                     </div>
                   </div>
                   <div class="line2">
@@ -101,9 +102,47 @@
                 <van-switch v-model="form.lunar_is_leap" size="20px" active-color="#ff7a9a" />
               </template>
             </van-cell>
+
+            <van-field
+              readonly
+              clickable
+              label="出生时辰"
+              :value="birthHourDisplay"
+              placeholder="选填，用于八字测算"
+              @click="showHourPicker = true"
+            />
+
+            <van-field
+              readonly
+              clickable
+              label="性别"
+              :value="genderDisplay"
+              placeholder="选填，用于排大运"
+              @click="showGenderPicker = true"
+            />
           </van-form>
         </div>
       </div>
+    </van-popup>
+
+    <van-popup v-model="showHourPicker" position="bottom" round>
+      <van-picker
+        show-toolbar
+        title="选择出生时辰"
+        :columns="hourColumns"
+        @confirm="onConfirmFormHour"
+        @cancel="showHourPicker = false"
+      />
+    </van-popup>
+
+    <van-popup v-model="showGenderPicker" position="bottom" round>
+      <van-picker
+        show-toolbar
+        title="选择性别"
+        :columns="['不填', '男', '女']"
+        @confirm="onConfirmGender"
+        @cancel="showGenderPicker = false"
+      />
     </van-popup>
 
     <van-popup v-model="showLunarPicker" position="bottom" round>
@@ -127,6 +166,8 @@
         @cancel="showSolarPicker = false"
       />
     </van-popup>
+
+    <bazi-dialog :visible.sync="showBazi" :item="baziItem" />
   </div>
 </template>
 
@@ -134,18 +175,41 @@
 import moment from 'moment'
 import { Toast, Dialog } from 'vant'
 import { getBirthdayListReq, addBirthdayReq, updateBirthdayReq, deleteBirthdayReq } from '@/api/baby'
+import BaziDialog from '@/views/mobile/components/BaziDialog.vue'
+
+// 十二时辰（代表整点，需与 BaziDialog 保持一致）
+const HOUR_OPTIONS = [
+  { label: '子时 (23-01)', hour: 0 },
+  { label: '丑时 (01-03)', hour: 2 },
+  { label: '寅时 (03-05)', hour: 4 },
+  { label: '卯时 (05-07)', hour: 6 },
+  { label: '辰时 (07-09)', hour: 8 },
+  { label: '巳时 (09-11)', hour: 10 },
+  { label: '午时 (11-13)', hour: 12 },
+  { label: '未时 (13-15)', hour: 14 },
+  { label: '申时 (15-17)', hour: 16 },
+  { label: '酉时 (17-19)', hour: 18 },
+  { label: '戌时 (19-21)', hour: 20 },
+  { label: '亥时 (21-23)', hour: 22 }
+]
 
 export default {
   name: 'MobileBirthday',
+  components: { BaziDialog },
   data() {
     return {
       list: [],
       loading: false,
       refreshing: false,
 
+      showBazi: false,
+      baziItem: null,
+
       showAddDialog: false,
       showLunarPicker: false,
       showSolarPicker: false,
+      showHourPicker: false,
+      showGenderPicker: false,
 
       isLunar: true,
       form: {
@@ -156,7 +220,9 @@ export default {
         lunar_month: 1,
         lunar_day: 1,
         lunar_is_leap: false,
-        solar_date: ''
+        solar_date: '',
+        birth_hour: null,
+        gender: null
       },
 
       formSolarDate: new Date(),
@@ -182,6 +248,18 @@ export default {
         return `${this.form.lunar_year}年${leapText}${this.form.lunar_month}月${this.form.lunar_day}日`
       }
       return this.form.solar_date || ''
+    },
+    hourColumns() {
+      return HOUR_OPTIONS.map(o => o.label)
+    },
+    birthHourDisplay() {
+      const opt = HOUR_OPTIONS.find(o => o.hour === this.form.birth_hour)
+      return opt ? opt.label.split(' ')[0] : ''
+    },
+    genderDisplay() {
+      if (this.form.gender === 1) return '男'
+      if (this.form.gender === 0) return '女'
+      return ''
     }
   },
   mounted() {
@@ -190,6 +268,10 @@ export default {
   methods: {
     onBack() {
       this.$router.back()
+    },
+    openBazi(item) {
+      this.baziItem = item
+      this.showBazi = true
     },
     async fetchList() {
       this.loading = true
@@ -230,7 +312,9 @@ export default {
         lunar_month: 1,
         lunar_day: 1,
         lunar_is_leap: false,
-        solar_date: ''
+        solar_date: '',
+        birth_hour: null,
+        gender: null
       }
       this.formSolarDate = new Date()
       this.showAddDialog = true
@@ -245,10 +329,20 @@ export default {
         lunar_month: item.lunar_month || 1,
         lunar_day: item.lunar_day || 1,
         lunar_is_leap: !!item.lunar_is_leap,
-        solar_date: item.solar_date || ''
+        solar_date: item.solar_date || '',
+        birth_hour: typeof item.birth_hour === 'number' ? item.birth_hour : null,
+        gender: typeof item.gender === 'number' ? item.gender : null
       }
       this.formSolarDate = item.solar_date ? new Date(item.solar_date) : new Date()
       this.showAddDialog = true
+    },
+    onConfirmFormHour(value, index) {
+      this.form.birth_hour = HOUR_OPTIONS[index].hour
+      this.showHourPicker = false
+    },
+    onConfirmGender(value) {
+      this.form.gender = value === '男' ? 1 : (value === '女' ? 0 : null)
+      this.showGenderPicker = false
     },
     openDatePicker() {
       if (this.isLunar) {
@@ -289,7 +383,9 @@ export default {
       const payload = {
         id: this.form.id || undefined,
         name,
-        relation: (this.form.relation || '').trim()
+        relation: (this.form.relation || '').trim(),
+        birth_hour: typeof this.form.birth_hour === 'number' ? this.form.birth_hour : null,
+        gender: typeof this.form.gender === 'number' ? this.form.gender : null
       }
 
       if (this.isLunar) {
@@ -446,6 +542,12 @@ export default {
   color: #1f2329;
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(31, 35, 41, 0.06);
+  font-weight: 700;
+}
+.chip-bazi {
+  color: #8a5a00;
+  background: rgba(184, 134, 11, 0.10);
+  border: 1px solid rgba(184, 134, 11, 0.30);
   font-weight: 700;
 }
 .line2 {
