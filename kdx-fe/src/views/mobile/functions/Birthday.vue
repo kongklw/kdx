@@ -22,7 +22,6 @@
                       <span v-if="item.relation" class="chip chip-muted">{{ item.relation }}</span>
                       <span class="chip chip-accent">{{ item.constellation || '-' }}</span>
                       <span v-if="item.age_text" class="chip chip-strong">{{ item.age_text }}</span>
-                      <span class="chip chip-bazi" @click.stop="openBazi(item)">八字</span>
                     </div>
                   </div>
                   <div class="line2">
@@ -43,6 +42,12 @@
                       <span class="next-days">（还有{{ item.next_birthday_in_days }}天）</span>
                     </span>
                     <span v-else class="next">下次生日：-</span>
+                  </div>
+                  <div class="bazi-row">
+                    <span class="bazi-btn" @click.stop="openBazi(item)">
+                      <span class="bazi-btn-icon">☰</span>
+                      <span class="bazi-btn-text">八字排盘</span>
+                    </span>
                   </div>
                 </div>
                 <div class="stamp-wrap">
@@ -505,12 +510,24 @@ export default {
 }
 .line1-left {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
+  overflow: hidden;
+}
+.line1-left .chip {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 年龄标签始终完整显示在第一行，不换行不压缩 */
+.chip-strong {
+  flex-shrink: 0;
 }
 .name {
+  flex-shrink: 0;
   font-size: 16px;
   font-weight: 800;
   color: #1f2329;
@@ -544,11 +561,48 @@ export default {
   border: 1px solid rgba(31, 35, 41, 0.06);
   font-weight: 700;
 }
-.chip-bazi {
-  color: #8a5a00;
-  background: rgba(184, 134, 11, 0.10);
-  border: 1px solid rgba(184, 134, 11, 0.30);
+.bazi-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ffb56b, #ff7e5f);
+  color: #fff;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 1px;
+  box-shadow: 0 3px 8px rgba(255, 126, 95, 0.35);
+  overflow: hidden;
+  transition: transform 0.15s ease;
+}
+.bazi-btn:active {
+  transform: scale(0.94);
+}
+.bazi-btn-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+/* 流光扫过动效，吸引注意 */
+.bazi-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -70%;
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: baziShine 3s ease-in-out infinite;
+}
+@keyframes baziShine {
+  0%, 55% {
+    left: -70%;
+  }
+  100% {
+    left: 140%;
+  }
 }
 .line2 {
   margin-top: 8px;
@@ -582,9 +636,17 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.bazi-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-start;
+}
 .next {
   white-space: nowrap;
   color: #1f2329;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .next-icon {
   margin-right: 4px;
