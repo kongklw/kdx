@@ -74,41 +74,173 @@ def get_authority_level(category):
     return SOURCE_AUTHORITY.get(category, 3)
 
 
-def split_document_by_section(content, chunk_size=500, chunk_overlap=50):
-    sections = re.split(r'(^##\s+.+)', content, flags=re.MULTILINE)
+# ──────────────────────────────────────────────
+# 切分辅助: 近似 token 长度 (优化3: token 感知替代纯字符数)
+# ──────────────────────────────────────────────
 
-    chunks = []
-    current_chunk = ''
-    current_section = ''
+def _est_tokens(text: str) -> int:
+    """
+    近似 token 估算: CJK(含中文标点/全角) 1字≈1token, 其他 4字符≈1token。
+    不用 tiktoken 的原因: 需联网下载 BPE 词表, 且对中文 embedding 场景只是近似。
+    text2vec 的分词器对中文基本 1 字 1 token, 该估算误差 <15%, 足够控制块长。
+    """
+    cjk = 0
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+            cjk += 1
+    other = len(text) - cjk
+    return cjk + (other + 3) // 4
 
-    for i, part in enumerate(sections):
-        if part.startswith('## '):
-            if current_chunk.strip():
-                chunks.append({
-                    'content': current_chunk.strip(),
-                    'section': current_section
-                })
-            current_section = part[3:].strip()
-            current_chunk = part + '\n'
+
+def _parse_units(content: str):
+    """
+    把 markdown 线性解析为原子单元序列 (保序):
+      unit = (title_path, kind, text),  kind ∈ {heading, para, table}
+
+    优化2: 多级标题(#..######)入标题栈 → 每块携带完整标题路径;
+           连续 '|' 行聚合为表格原子块, 表格永不跨块拆散。
+    """
+    units = []
+    stack = []          # [(level, title)] 当前标题栈
+    buf, buf_is_table = [], False
+
+    def _path():
+        return ' > '.join(t for _, t in stack) if stack else '正文'
+
+    def flush_para():
+        nonlocal buf, buf_is_table
+        if buf:
+            text = '\n'.join(buf).strip()
+            if text:
+                units.append((_path(), 'table' if buf_is_table else 'para', text))
+            buf, buf_is_table = [], False
+
+    for line in content.split('\n'):
+        stripped = line.strip()
+        m = re.match(r'^(#{1,6})\s+(.+)$', stripped)
+        if m:
+            flush_para()
+            level, title = len(m.group(1)), m.group(2).strip()
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, title))
+            units.append((_path(), 'heading', stripped))
+        elif stripped.startswith('|'):
+            if buf and not buf_is_table:
+                flush_para()
+            buf_is_table = True
+            buf.append(line.rstrip())
+        elif not stripped:
+            flush_para()
         else:
-            sentences = part.split('\n')
-            for sentence in sentences:
-                if len(current_chunk) + len(sentence) <= chunk_size:
-                    current_chunk += sentence + '\n'
-                else:
-                    if current_chunk.strip():
-                        chunks.append({
-                            'content': current_chunk.strip(),
-                            'section': current_section
-                        })
-                    current_chunk = sentence + '\n'
+            if buf_is_table:
+                flush_para()
+            buf.append(line.rstrip())
+    flush_para()
+    return units
 
-    if current_chunk.strip():
-        chunks.append({
-            'content': current_chunk.strip(),
-            'section': current_section
-        })
 
+def _make_chunk(buf, section: str) -> dict:
+    path = section.split(' > ')
+    return {
+        'content': '\n\n'.join(t for _, t in buf),
+        'section': section,
+        # 父标题路径 (small-to-big: 检索用小块, 返回时可扩到父章节)
+        'parent_section': ' > '.join(path[:-1]) if len(path) > 1 else section,
+    }
+
+
+def _hard_split(text: str, chunk_size: int, chunk_overlap: int):
+    """超长段落兜底: 句子级硬切, 同样带 overlap (避免单段 >chunk_size 时溢出)"""
+    sents = [s for s in re.split(r'(?<=[。！？!?\n])', text) if s.strip()]
+    out, buf, blen = [], [], 0
+    for s in sents:
+        sl = _est_tokens(s)
+        if buf and blen + sl > chunk_size:
+            out.append(''.join(buf).strip())
+            tail, tl = [], 0
+            for x in reversed(buf):
+                xl = _est_tokens(x)
+                if tl + xl > chunk_overlap and tail:
+                    break
+                tail.insert(0, x)
+                tl += xl
+            buf, blen = tail, tl
+        buf.append(s)
+        blen += sl
+    if ''.join(buf).strip():
+        out.append(''.join(buf).strip())
+    return [s for s in out if s]
+
+
+def _tail_overlap(buf, chunk_overlap: int, chunk_size: int):
+    """块尾重叠: 从尾部回取完整原子单元, 不跨 heading、不超 overlap 预算、不超半块"""
+    tail, tlen = [], 0
+    for kind, text in reversed(buf):
+        tl = _est_tokens(text) + 1
+        if kind == 'heading' or (tail and tlen + tl > chunk_overlap) \
+                or tlen + tl > chunk_size // 2:
+            break
+        tail.insert(0, (kind, text))
+        tlen += tl
+    return tail, tlen
+
+
+def split_document_by_section(content, chunk_size=500, chunk_overlap=50):
+    """
+    结构感知切分 (生产版, 三阶段流水线: 分组→短节合并→打包+overlap)
+
+    优化1 (overlap): 阶段3 封口时尾部回取完整单元作下一块开头, 不截半句/半表,
+                     不跨 heading 语义边界, 总量 ≤ chunk_overlap 且 ≤ 半块。
+    优化2 (结构感知): 多级标题(#..######)开启章节组, section 为完整标题路径;
+                      段落/表格是原子单元 —— 表格永不跨块, 句子永不被切断。
+    优化3 (token):   长度按近似 token 计量 (_est_tokens), 中文按字英文按词。
+    短节合并 (MIN_CHUNK_TOKENS) 避免碎块被质量过滤丢弃。
+    """
+    units = _parse_units(content)
+    if not units:
+        return []
+
+    # 阶段1: heading 开启章节组, 组内累计原子单元
+    sections = []                                   # [[path, [(kind, text)]]]
+    for path, kind, text in units:
+        if kind == 'heading' or not sections:
+            sections.append([path, []])
+        sections[-1][1].append((kind, text))
+
+    # 阶段2: 短章节合并 (向前并入), 防止产生 <MIN_CHUNK 的碎块
+    MIN_CHUNK_TOKENS = 80
+    groups = []
+    for path, us in sections:
+        size = _est_tokens('\n\n'.join(t for _, t in groups[-1][1])) if groups else 0
+        if groups and size < MIN_CHUNK_TOKENS:
+            groups[-1][1].extend(us)                # 并入前组, 保留前组路径
+        else:
+            groups.append([path, list(us)])
+    if len(groups) > 1 and \
+            _est_tokens('\n\n'.join(t for _, t in groups[-1][1])) < MIN_CHUNK_TOKENS:
+        groups[-2][1].extend(groups.pop()[1])       # 末组过短并入前一组
+
+    # 阶段3: 组内线性打包, 超长封口并回取 overlap
+    chunks = []
+    for path, us in groups:
+        buf, blen = [], 0
+        for kind, text in us:
+            tl = _est_tokens(text) + 1
+            if tl > chunk_size:                     # 单元超长: 句子级硬切兜底
+                if buf:
+                    chunks.append(_make_chunk(buf, path))
+                    buf, blen = [], 0
+                for seg in _hard_split(text, chunk_size, chunk_overlap):
+                    chunks.append(_make_chunk([('para', seg)], path))
+                continue
+            if buf and blen + tl > chunk_size:
+                chunks.append(_make_chunk(buf, path))
+                buf, blen = _tail_overlap(buf, chunk_overlap, chunk_size)
+            buf.append((kind, text))
+            blen += tl
+        if buf:
+            chunks.append(_make_chunk(buf, path))
     return chunks
 
 
@@ -241,6 +373,7 @@ def init_chroma_db(documents):
                 'filepath': doc['filepath'],
                 'title': doc['title'],
                 'section': chunk['section'],
+                'parent_section': chunk.get('parent_section', ''),
                 'topics': doc['topics'],
                 'age_ranges': doc['age_ranges'],
                 'authority': doc['authority'],

@@ -72,10 +72,24 @@ def get_chroma_collection():
 
 class RAGState(TypedDict):
     query: str
-    documents: dict
+    hits: list          # 混合检索命中 (含融合分/月龄匹配/来源)
+    context: str        # 精排 + 父章节扩展后的最终上下文
+    documents: dict     # 兼容字段 (原始向量召回结果)
     sources: list
     prompt: str
     answer: str
+
+
+# 混合检索器单例 (BM25 索引懒构建, 知识库重建后可调 invalidate_index)
+_retriever = None
+
+
+def get_retriever():
+    global _retriever
+    if _retriever is None:
+        from ..rag.retriever import HybridRetriever
+        _retriever = HybridRetriever(get_chroma_collection(), get_embedding_function())
+    return _retriever
 
 
 async def send_ws_event(ws: WebSocket, event_type: str, data: Dict[str, Any]):
@@ -85,77 +99,98 @@ async def send_ws_event(ws: WebSocket, event_type: str, data: Dict[str, Any]):
     })
 
 
-def build_prompt(query, documents):
-    context = ""
-    for i, (doc, meta) in enumerate(zip(documents['documents'][0], documents['metadatas'][0])):
-        source = meta.get('filename', '未知来源')
-        title = meta.get('title', '')
-        context += f"【文档{i + 1}】来源: {source}\n标题: {title}\n内容:\n{doc}\n\n"
+def build_context(hits, expanded) -> str:
+    """精排 + 父章节扩展后的最终上下文: 命中块全量, 父块标注补充"""
+    parts = []
+    seen = set()
+    for i, item in enumerate(expanded):
+        cid = item['id']
+        if cid in seen:
+            continue
+        seen.add(cid)
+        meta = item.get('meta') or {}
+        title = meta.get('title') or meta.get('section') or '未知来源'
+        tag = '命中' if item.get('rel') == 'hit' else '补充'
+        parts.append(f"【文档{i + 1}·{tag}】标题: {title}\n内容:\n{item['doc']}")
+    return '\n\n'.join(parts)
 
+
+def build_prompt(query, context):
     system_prompt = """你是一位专业的育儿知识助手。请根据提供的知识库内容，回答用户的问题。
 
 规则：
 1. 优先使用知识库中的信息进行回答
 2. 如果知识库中没有相关信息，请明确说明"知识库中未找到相关信息"
 3. 回答要简洁、准确，避免冗长
-4. 可以引用知识库中的来源信息
+4. 回答时标注引用来源，如 [文档1]
 """
 
-    prompt = f"{system_prompt}\n\n知识库内容:\n{context}\n\n用户问题: {query}"
-    return prompt
+    return f"{system_prompt}\n\n知识库内容:\n{context}\n\n用户问题: {query}"
 
 
 async def retrieve_node(state: RAGState, ws: WebSocket) -> RAGState:
-    print(f'retrieve node -> {state}')
+    """混合检索: 向量 + BM25 RRF 融合, 月龄软过滤, 权威度加权"""
     query = state["query"]
     await send_ws_event(ws, "retrieve_start", {"query": query})
 
-    collection = get_chroma_collection()
-    query_embedding = get_embedding_function().embed_query(query)
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=3
-    )
-
-    sources = []
-    docs_info = []
-    for i, meta in enumerate(results['metadatas'][0]):
-        source_info = {
-            'index': i + 1,
-            'title': meta.get('title', ''),
-            'filename': meta.get('filename', ''),
-            'category': meta.get('category', ''),
-            'topics': meta.get('topics', []),
-            'age_ranges': meta.get('age_ranges', []),
-        }
-        sources.append(source_info)
-        docs_info.append({
-            **source_info,
-            'content': results['documents'][0][i][:200] + '...' if len(results['documents'][0][i]) > 200 else
-            results['documents'][0][i],
-            'distance': float(results['distances'][0][i]) if results.get('distances') else None
-        })
+    retriever = get_retriever()
+    result = retriever.search(query, k=3, fetch=20)
+    hits = result['hits']
 
     await send_ws_event(ws, "retrieve_done", {
         "query": query,
-        "count": len(docs_info),
-        "documents": docs_info
+        "count": len(hits),
+        "age_months": result['age_months'],
+        "debug": result['debug'],
+        "documents": [{
+            'index': i + 1,
+            'id': h['id'],
+            'title': (h.get('meta') or {}).get('title', ''),
+            'section': (h.get('meta') or {}).get('section', ''),
+            'category': (h.get('meta') or {}).get('category', ''),
+            'score': round(h['score'], 4),
+            'vec_rank': h.get('vec_rank'),
+            'bm25_rank': h.get('bm25_rank'),
+            'age_match': h.get('age_match'),
+        } for i, h in enumerate(hits)],
     })
 
     return {**state,
-            "documents": results,
-            "sources": sources
+            "hits": hits,
+            "sources": [{
+                'index': i + 1,
+                'title': (h.get('meta') or {}).get('title', ''),
+                'filename': (h.get('meta') or {}).get('filename', ''),
+                'category': (h.get('meta') or {}).get('category', ''),
+            } for i, h in enumerate(hits)],
             }
 
 
+async def rerank_node(state: RAGState, ws: WebSocket) -> RAGState:
+    """父章节扩展 (small-to-big): 命中块 → 同父章节相邻块, 组装最终上下文"""
+    hits = state["hits"]
+
+    retriever = get_retriever()
+    expanded = retriever.expand_parents(hits)
+    context = build_context(hits, expanded)
+
+    await send_ws_event(ws, "rerank_done", {
+        "hit_count": len(hits),
+        "expanded_count": len(expanded),
+        "context_chars": len(context),
+    })
+
+    return {**state, "context": context}
+
+
 async def generate_node(state: RAGState, ws: WebSocket) -> RAGState:
-    print(f'generate_node {state}')
+    print(f'generate_node')
     query = state["query"]
-    documents = state["documents"]
+    context = state["context"]
 
     await send_ws_event(ws, "generate_start", {"query": query})
 
-    prompt = build_prompt(query, documents)
+    prompt = build_prompt(query, context)
     await send_ws_event(ws, "prompt_generated", {
         "prompt_length": len(prompt)
     })
@@ -205,13 +240,18 @@ def create_rag_graph(ws: WebSocket):
     async def retrieve_with_ws(state: RAGState) -> RAGState:
         return await retrieve_node(state, ws)
 
+    async def rerank_with_ws(state: RAGState) -> RAGState:
+        return await rerank_node(state, ws)
+
     async def generate_with_ws(state: RAGState) -> RAGState:
         return await generate_node(state, ws)
 
     workflow.add_node("retrieve", retrieve_with_ws)
+    workflow.add_node("rerank", rerank_with_ws)
     workflow.add_node("generate", generate_with_ws)
     workflow.set_entry_point("retrieve")
-    workflow.add_edge("retrieve", "generate")
+    workflow.add_edge("retrieve", "rerank")
+    workflow.add_edge("rerank", "generate")
 
     return workflow.compile()
 

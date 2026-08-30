@@ -131,3 +131,6 @@ dmypy.json
 # static
 /static
 media
+
+# Runtime data (vector DB)
+data/chroma_db/
