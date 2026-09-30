@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-#
 # kdx-ws-be 镜像
 # 说明: 本机 Docker 未安装 buildx, 只能用 legacy builder; legacy builder 在 COPY
 # 跨阶段大目录(如 ~1.5GB 的 .venv)时会报 "archive/tar: invalid tar header"。
