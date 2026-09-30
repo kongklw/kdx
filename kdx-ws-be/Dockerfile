@@ -37,17 +37,16 @@ RUN useradd -m -u 1000 appuser
 WORKDIR /app
 
 # 仅拷贝依赖描述文件, 最大化利用 Docker 层缓存(改动 app/ 不会重装依赖)
-COPY ./kdx-ws-be/pyproject.toml ./kdx-ws-be/uv.lock /app/
+# 不使用 uv.lock: 每次构建按 pyproject.toml 的约束实时解析,
+# 避免锁文件里固化的镜像源 URL 失效(如镜像源 403)导致构建失败
+COPY ./kdx-ws-be/pyproject.toml /app/
 
-# 安装 uv 并严格按锁文件同步生产依赖
-#   --frozen         : 严格按 uv.lock 安装, 不做任何重新解析(保证可复现构建)
-#                     若 pyproject.toml 与 uv.lock 不一致会直接报错,
-#                     此时在 kdx-ws-be 目录执行 `uv lock` 更新锁文件即可
+# 安装 uv 并按 pyproject.toml 解析安装生产依赖
 #   --no-dev         : 跳过开发依赖
 #   --no-install-project : 只装依赖, 不构建项目本身(运行代码 app/ 由下方 COPY 提供)
 #   UV_CACHE_DIR 指向临时目录并在安装后清理, 避免缓存撑大镜像
 RUN pip install --no-cache-dir uv -i https://mirrors.aliyun.com/pypi/simple/ && \
-    UV_CACHE_DIR=/tmp/uv-cache uv sync --frozen --no-dev --no-install-project && \
+    UV_CACHE_DIR=/tmp/uv-cache uv sync --no-dev --no-install-project && \
     rm -rf /tmp/uv-cache /root/.cache/huggingface
 
 # 准备运行时目录与权限
