@@ -31,7 +31,7 @@ dependencies = [
 kdx-ws-be = "kdx_ws_be:main"
 
 [[tool.uv.index]]
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+url = "https://mirrors.aliyun.com/pypi/simple"
 default = true
 
 # torch 走 CPU 源, 避免 CUDA 版 (数 GB) 被拉入
