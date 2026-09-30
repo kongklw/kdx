@@ -1,66 +1,62 @@
-# 使用华为云 Python 镜像（阿里云ECS环境）
+# kdx-be 镜像 (Django + uWSGI)
+# 说明: 生产环境 compose 会用 ./kdx-be:/home/kdx-be 卷挂载覆盖源码,
+#       镜像自带源码仅作独立运行/兜底用; 真正生效的是宿主机源码。
 FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.12-slim
 
-# 设置超时环境变量
-ENV PIP_DEFAULT_TIMEOUT=120
-ENV PIP_CONNECT_TIMEOUT=60
+# pip 超时设置 + Python 运行时设置 + 兼容性设置(合并为单层, 减少镜像层数)
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_CONNECT_TIMEOUT=60 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    ORT_DISABLE_CPU_OPTIMIZATION=1 \
+    ONNXRUNTIME_DISABLE_OPTIMIZATION=1 \
+    OMP_NUM_THREADS=1 \
+    OPENCV_DNN_USE_OPENCL=0 \
+    APP_HOME=/home/kdx-be
 
-# 替换软件源为阿里云
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
-
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    default-libmysqlclient-dev \
-    build-essential \
-    netcat-openbsd \
-    ffmpeg \
-    libgomp1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    curl \
-    unzip \
+# 替换软件源为阿里云 + 安装系统依赖
+# 注: netcat-openbsd 已移除(旧 start.sh 里的 nc 等待逻辑已废弃且 start.sh 未被引用,
+#       db 健康检查改由 compose depends_on: service_healthy 保证)
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config \
+        default-libmysqlclient-dev \
+        build-essential \
+        ffmpeg \
+        libgomp1 \
+        libglib2.0-0 \
+        libsm6 \
+        libxext6 \
+        curl \
+        unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 设置 python 环境变量
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-# 禁用 ONNX Runtime 和 OpenCV 的 CPU 优化（兼容更多 CPU 型号）
-ENV ORT_DISABLE_CPU_OPTIMIZATION 1
-ENV ONNXRUNTIME_DISABLE_OPTIMIZATION 1
-ENV OMP_NUM_THREADS=1
-ENV OPENCV_DNN_USE_OPENCL=0
-
-# 设置工作目录
-ENV APP_HOME=/home/kdx-be
 RUN mkdir -p $APP_HOME
 WORKDIR $APP_HOME
 
-# 先复制 requirements.txt（利用 Docker 缓存）
+# 先复制 requirements.txt (利用 Docker 层缓存: 改代码不重装依赖)
 COPY requirements.txt .
 
-# 使用 pip 安装依赖
-RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --no-cache-dir
+# 安装 Python 依赖 (合并为单条 RUN, 使用阿里云源, 不留缓存)
+RUN pip install --no-cache-dir --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
+    pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
 
-# 复制本地 InsightFace 模型（无需网络下载）
+# 复制本地 InsightFace 模型 (无需网络下载)
 RUN mkdir -p /root/.insightface/models
 COPY buffalo_l.zip /tmp/
 RUN unzip -q /tmp/buffalo_l.zip -d /root/.insightface/models/ && \
-    rm /tmp/buffalo_l.zip
-RUN chmod -R 755 /root/.insightface
+    rm /tmp/buffalo_l.zip && \
+    chmod -R 755 /root/.insightface
 
-# 复制项目代码
+# 复制项目代码 (.dockerignore 已排除 .env/logs/缓存等)
 COPY . .
 
-# 创建日志目录
-RUN mkdir -p /home/kdx-be/logs
+# 日志目录
+RUN mkdir -p $APP_HOME/logs
 
-# 添加健康检查
+# 健康检查 (uWSGI http 监听 8000)
 HEALTHCHECK --interval=30s --timeout=3s \
   CMD curl -f http://localhost:8000/ || exit 1
 
-# 启动 uwsgi 服务
+# 启动 uWSGI
 CMD ["uwsgi", "--ini", "/home/kdx-be/uwsgi.ini"]

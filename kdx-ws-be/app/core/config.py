@@ -48,7 +48,6 @@ def get_settings() -> Settings:
         f"mysql+pymysql://{quote_plus(mysql_user)}:{quote_plus(mysql_password)}"
         f"@{mysql_host}:{mysql_port}/{mysql_db}"
     )
-    print('*************mysql dsn:**********',mysql_dsn)
 
     allow_anon_ws = (os.getenv("VOICE_WS_ALLOW_ANON") or "").lower() in {"1", "true", "yes"}
 

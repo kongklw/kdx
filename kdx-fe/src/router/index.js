@@ -94,6 +94,12 @@ export const constantRoutes = [
         meta: { title: 'AI Park' }
       },
       {
+        path: 'ai-entrance',
+        component: () => import('@/views/mobile/AiEntrance'),
+        name: 'MobileAiEntrance',
+        meta: { title: 'AI 助手' }
+      },
+      {
         path: 'message',
         component: () => import('@/views/mobile/Message'),
         name: 'MobileMessage',

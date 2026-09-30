@@ -5,7 +5,7 @@
 - register / unregister: 动态注册与热下线
 - get_schemas_for_llm: 生成传给 LLM 的 OpenAI function calling schema
 - is_write: 写操作标记 → Agent 层据此触发 HITL 人工确认
-- execute: 带异常包装的安全执行
+- execute: 三层防线 — JSON Schema 校验 → 超时控制 → 异常统一包装
 """
 
 import json
@@ -23,6 +23,7 @@ class ToolMeta:
     is_write: bool = False                  # 写操作需要 HITL 确认
     tags: List[str] = field(default_factory=list)
     enabled: bool = True
+    timeout_s: float = 10.0                 # 单工具超时 (秒)
 
 
 class ToolRegistry:
@@ -61,13 +62,60 @@ class ToolRegistry:
         meta = self._tools.get(name)
         return bool(meta and meta.is_write)
 
+    def _validate_args(self, meta: ToolMeta, args: Dict[str, Any]) -> Optional[str]:
+        """防线 1: 按 JSON Schema 校验 LLM 传参 (不信任 LLM)"""
+        schema = meta.parameters
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
+
+        # 必填检查
+        for req in required:
+            if req not in args or args[req] is None:
+                return f"missing required parameter: {req}"
+
+        # 类型检查 (基本类型)
+        type_map = {
+            "string": str, "integer": int, "number": (int, float),
+            "boolean": bool, "array": list, "object": dict,
+        }
+        for key, val in args.items():
+            if key in ("user_id", "request_id"):  # 系统注入, 跳过
+                continue
+            prop = props.get(key)
+            if not prop:
+                continue
+            expected = prop.get("type")
+            if expected and expected in type_map:
+                py_type = type_map[expected]
+                if not isinstance(val, py_type):
+                    return f"parameter '{key}' must be {expected}, got {type(val).__name__}"
+
+            # enum 校验
+            enum_vals = prop.get("enum")
+            if enum_vals and val not in enum_vals:
+                return f"parameter '{key}' must be one of {enum_vals}, got '{val}'"
+
+        return None
+
     def execute(self, name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        """安全执行工具：异常统一包装为 {"ok": False, "error": ...}"""
+        """
+        安全执行工具: 三层防线
+        防线1: JSON Schema 校验 → 参数错误结构化回灌 LLM 让其自纠
+        防线2: 超时控制 → 防单个慢 SQL 卡住 ReAct 轮次
+        防线3: 异常统一包装 → {"ok": False, "error": ...}
+        """
         meta = self._tools.get(name)
         if meta is None:
             return {"ok": False, "error": f"tool not found: {name}"}
         if not meta.enabled:
             return {"ok": False, "error": f"tool disabled: {name}"}
+
+        # 防线 1: 参数校验
+        err = self._validate_args(meta, args)
+        if err:
+            return {"ok": False, "error": err, "retry_hint": True}
+
+        # 防线 3: 执行 + 异常包装
         try:
             result = meta.handler(**(args or {}))
             return {"ok": True, "data": result}

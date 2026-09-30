@@ -9,10 +9,15 @@ import os
 import json
 import shutil
 import re
+import sys
+import hashlib
+import argparse
 from pathlib import Path
 
 RAG_DATA_DIR = Path(__file__).parent.parent / 'data' / 'rag' / 'baby_feeding'
 CHROMA_DB_DIR = Path(__file__).parent.parent / 'data' / 'chroma_db'
+MANIFEST_PATH = CHROMA_DB_DIR / 'manifest.json'   # 增量管道: 文档清单 + 内容指纹
+INVALIDATE_CHANNEL = 'kb:invalidate'              # BM25 失效广播频道
 
 TOPIC_KEYWORDS = {
     '喂养营养': ['喂养', '辅食', '营养', '母乳', '配方奶', '膳食', '饮食', '断奶', '吃奶', '奶量'],
@@ -290,8 +295,9 @@ def load_markdown_files():
                     filepath = category_path / filename
 
                     try:
-                        with open(filepath, 'r', encoding='utf-8') as f:
-                            content = f.read()
+                        with open(filepath, 'rb') as f:
+                            content_bytes = f.read()
+                        content = content_bytes.decode('utf-8', errors='replace')
                         metadata = extract_metadata_from_content(content)
                         if metadata['title'] in seen_titles:
                             print(f"重复文档跳过: {metadata['title']}")
@@ -303,6 +309,7 @@ def load_markdown_files():
                             'filename': filename,
                             'content': content,
                             'filepath': str(filepath),
+                            'md5': hashlib.md5(content_bytes).hexdigest(),  # 增量指纹
                             'title': metadata['title'],
                             'topics': metadata['topics'],
                             'age_ranges': metadata['age_ranges'],
@@ -321,6 +328,135 @@ def split_document(content, chunk_size=500, chunk_overlap=50):
     chunks = filter_low_quality_chunks(chunks)
     chunks = deduplicate_chunks(chunks)
     return chunks
+
+
+def _chunkize_doc(doc):
+    """单文档 → (texts, metadatas, ids) 三列 (供全量/增量复用)"""
+    texts, metadatas, ids = [], [], []
+    chunks = split_document(doc['content'])
+    for i, chunk in enumerate(chunks):
+        texts.append(chunk['content'])
+        metadatas.append({
+            'category': doc['category'],
+            'filename': doc['filename'],
+            'filepath': doc['filepath'],
+            'title': doc['title'],
+            'section': chunk['section'],
+            'parent_section': chunk.get('parent_section', ''),
+            'topics': doc['topics'],
+            'age_ranges': doc['age_ranges'],
+            'authority': doc['authority'],
+            'chunk_index': i,
+            'total_chunks': len(chunks),
+        })
+        ids.append(f"{doc['filename']}_{i}")
+    return texts, metadatas, ids
+
+
+def _add_batches(collection, texts, metadatas, ids):
+    """分批写入 Chroma (单批 100, 避免大文档集内存峰值)"""
+    batch_size = 100
+    for i in range(0, len(texts), batch_size):
+        end = min(i + batch_size, len(texts))
+        print(
+            f"Adding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size} ({end - i} chunks)...")
+        collection.add(
+            documents=texts[i:end],
+            metadatas=metadatas[i:end],
+            ids=ids[i:end],
+        )
+        print(f"Batch {i // batch_size + 1} added, current count: {collection.count()}")
+
+
+# ──────────────────────────────────────────────
+# 增量管道 (2.5: 知识库增量更新 + 版本管理 + BM25 失效联动)
+# ──────────────────────────────────────────────
+
+def _load_manifest() -> dict:
+    if MANIFEST_PATH.exists():
+        try:
+            return json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_manifest(manifest: dict) -> None:
+    CHROMA_DB_DIR.mkdir(parents=True, exist_ok=True)
+    MANIFEST_PATH.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def _publish_invalidate() -> None:
+    """向所有在线进程广播 BM25 索引失效 (Redis pub/sub)"""
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from app.core.config import get_settings
+        import redis
+        r = redis.Redis.from_url(get_settings().redis_url, decode_responses=True)
+        r.publish(INVALIDATE_CHANNEL, "1")
+        r.close()
+        print(f"已广播 BM25 失效信号 → {INVALIDATE_CHANNEL}")
+    except Exception as e:
+        print(f"广播 BM25 失效失败 (不影响入库): {e}")
+
+
+def incremental_ingest(documents):
+    """
+    增量模式: 以 filepath+md5 为指纹
+      - 未变文档: 跳过 (零 embedding 成本)
+      - 新增/变更文档: 删除旧块 → 重写新块 (upsert 语义)
+      - 消失文档: 按 filepath 删除
+    完成后广播 BM25 失效。
+    """
+    import time
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+    from chromadb import PersistentClient
+    from app.scripts.text2vec_embedding_text2vec import Text2VecEmbeddingFunction
+
+    embedding_function = Text2VecEmbeddingFunction()
+    client = PersistentClient(path=str(CHROMA_DB_DIR))
+    collection = client.get_or_create_collection(
+        name="baby_feeding",
+        embedding_function=embedding_function,
+        metadata={"hnsw:space": "cosine"},
+    )
+    print(f"现有向量数: {collection.count()}")
+
+    manifest = _load_manifest()
+    current = {d['filepath']: d for d in documents}
+
+    added, changed, deleted = [], [], []
+    for fp, doc in current.items():
+        if manifest.get(fp) == doc['md5']:
+            continue  # 指纹一致, 跳过
+        if manifest.get(fp) is None:
+            added.append(doc)
+        else:
+            changed.append(doc)
+        # upsert: 删除旧块 → 写入新块
+        collection.delete(where={"filepath": fp})
+        d_texts, d_metas, d_ids = _chunkize_doc(doc)
+        _add_batches(collection, d_texts, d_metas, d_ids)
+        manifest[fp] = doc['md5']
+        print(f"[upsert] {fp} → {len(d_ids)} chunks")
+
+    # 消失文档: manifest 里有但磁盘已无
+    for fp in list(manifest.keys()):
+        if fp not in current:
+            collection.delete(where={"filepath": fp})
+            del manifest[fp]
+            deleted.append(fp)
+            print(f"[delete] {fp}")
+
+    _save_manifest(manifest)
+    print(f"\n增量完成: 新增={len(added)} 变更={len(changed)} 删除={len(deleted)} 跳过={len(documents) - len(added) - len(changed)}")
+    print(f"增量后向量数: {collection.count()}")
+
+    # BM25 索引失效联动 (所有在线进程)
+    if added or changed or deleted:
+        _publish_invalidate()
 
 
 def init_chroma_db(documents):
@@ -364,45 +500,17 @@ def init_chroma_db(documents):
 
     print(f"Processing {len(documents)} documents...")
     for doc_idx, doc in enumerate(documents):
-        chunks = split_document(doc['content'])
-        for i, chunk in enumerate(chunks):
-            texts.append(chunk['content'])
-            metadatas.append({
-                'category': doc['category'],
-                'filename': doc['filename'],
-                'filepath': doc['filepath'],
-                'title': doc['title'],
-                'section': chunk['section'],
-                'parent_section': chunk.get('parent_section', ''),
-                'topics': doc['topics'],
-                'age_ranges': doc['age_ranges'],
-                'authority': doc['authority'],
-                'chunk_index': i,
-                'total_chunks': len(chunks),
-            })
-            ids.append(f"{doc['filename']}_{i}")
-            doc_ids.append(doc['filename'])
+        d_texts, d_metas, d_ids = _chunkize_doc(doc)
+        texts.extend(d_texts)
+        metadatas.extend(d_metas)
+        ids.extend(d_ids)
+        doc_ids.extend({doc['filename']})
 
         if (doc_idx + 1) % 10 == 0:
             print(f"Processed {doc_idx + 1}/{len(documents)} documents, {len(texts)} chunks collected")
 
     print(f"Total chunks to add: {len(texts)}")
-
-    batch_size = 100
-    for i in range(0, len(texts), batch_size):
-        end = min(i + batch_size, len(texts))
-        batch_texts = texts[i:end]
-        batch_metadatas = metadatas[i:end]
-        batch_ids = ids[i:end]
-
-        print(
-            f"Adding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size} ({len(batch_texts)} chunks)...")
-        collection.add(
-            documents=batch_texts,
-            metadatas=batch_metadatas,
-            ids=batch_ids
-        )
-        print(f"Batch {i // batch_size + 1} added, current count: {collection.count()}")
+    _add_batches(collection, texts, metadatas, ids)
 
     print(f"已加载 {len(texts)} 个文档块到 Chroma")
     print(f"覆盖 {len(set(doc_ids))} 个文档")
@@ -427,9 +535,15 @@ def init_chroma_db(documents):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="RAG 知识库加载")
+    parser.add_argument("--incremental", action="store_true",
+                        help="增量模式: 按文件指纹只更新变更文档 (默认全量重建)")
+    args = parser.parse_args()
+
     print("=== 加载 RAG 知识库 ===")
     print(f"数据目录: {RAG_DATA_DIR}")
     print(f"Chroma 数据库目录: {CHROMA_DB_DIR}")
+    print(f"模式: {'增量更新' if args.incremental else '全量重建'}")
 
     documents = load_markdown_files()
     print(f"\n找到 {len(documents)} 个文档")
@@ -438,9 +552,17 @@ def main():
         print("没有找到文档，请先运行爬虫脚本")
         return
 
-    print("\n初始化 text2vec 模型...")
-    print("\n初始化 Chroma 向量数据库...")
-    init_chroma_db(documents)
+    if args.incremental:
+        print("\n加载 text2vec 模型...")
+        incremental_ingest(documents)
+    else:
+        print("\n初始化 text2vec 模型...")
+        print("\n初始化 Chroma 向量数据库...")
+        init_chroma_db(documents)
+        # 全量重建后: 重置 manifest + 广播 BM25 失效 (存量进程同步)
+        manifest = {d['filepath']: d['md5'] for d in documents}
+        _save_manifest(manifest)
+        _publish_invalidate()
 
     print("\n=== 知识库加载完成 ===")
 

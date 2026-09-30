@@ -18,6 +18,7 @@ dependencies = [
     "langchain-openai>=1.4.3",
     "langgraph>=1.2.10",
     "loguru>=0.7.3",
+    "pymilvus>=3.0.1",
     "pymysql>=1.2.0",
     "redis>=8.1.0",
     "sqlalchemy>=2.0.51",

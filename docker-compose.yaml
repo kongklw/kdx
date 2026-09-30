@@ -1,10 +1,16 @@
-version: "3"
+# KDX ECS 部署编排 (纯 docker compose 手动管理)
+# 常用命令:
+#   构建并启动        docker compose up -d --build
+#   重建单个服务      docker compose up -d --build web
+#   查看日志          docker compose logs -f web
+#   Django 迁移       docker compose exec web python manage.py migrate
+#   收集静态文件      docker compose exec web python manage.py collectstatic --noinput
+#   前端重新构建      cd kdx-fe && npm run build  (nginx 通过卷挂载直接读取 dist)
 
 volumes:
   db_vol:
   redis_vol:
   media_vol:
-  insightface_vol:
   huggingface_vol:
 
 networks:
@@ -15,9 +21,18 @@ networks:
   redis_network:
     driver: bridge
 
+# 公共日志轮转配置
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   redis:
-    image: redis:latest
+    # 固定版本: 用 docker tag 给 ECS 上现有的 redis:latest(4 年前=6.2.x) 打标签,
+    # 避免 compose 拉新镜像(详见部署文档)。若实际 --version 显示 7.0.x, 改此处与 tag 命令为 7.0
+    image: redis:6.2
     command: redis-server /etc/redis/redis.conf
     networks:
       - redis_network
@@ -25,11 +40,20 @@ services:
       - redis_vol:/data
       - ./compose/redis/redis.conf:/etc/redis/redis.conf
     ports:
-      - "6379:6379"
-    restart: always
+      - "6379:6379" # 对外开放, 便于外部工具连接(redis.conf 已设 requirepass)
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging: *default-logging
 
   db:
-    image: mysql:latest
+    # 固定版本: 用 docker tag 给 ECS 上现有的 mysql:latest(4 年前=8.0.x, 516MB) 打标签为 mysql:8.0,
+    # compose 即用本地现有镜像, 不拉新版本, 与现有数据完全匹配, 零风险
+    image: mysql:8.0
     env_file:
       - kdx-be/.env
     networks:
@@ -39,8 +63,15 @@ services:
       - ./compose/mysql/conf/my.cnf:/etc/mysql/my.cnf
       - ./compose/mysql/init:/docker-entrypoint-initdb.d/
     ports:
-      - "3306:3306"
-    restart: always
+      - "3306:3306" # 对外开放, 便于外部 MySQL 工具连接查看数据
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *default-logging
 
   web:
     build: ./kdx-be
@@ -54,10 +85,13 @@ services:
       - db_network
       - redis_network
     depends_on:
-      - db
-      - redis
-    restart: always
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     container_name: kdx-be
+    logging: *default-logging
 
   kdx_ws:
     build:
@@ -77,10 +111,20 @@ services:
       - db_network
       - redis_network
     depends_on:
-      - db
-      - redis
-    restart: always
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
     container_name: kdx-ws-be
+    healthcheck:
+      # 容器内未必有 curl, 用 python 探测 8002 端口是否可连
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(3); s.connect(('127.0.0.1', 8002)); s.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
 
   nginx:
     build: ./compose/nginx
@@ -97,5 +141,9 @@ services:
       - media_vol:/usr/share/nginx/media
     networks:
       - nginx_network
-    restart: always
+    restart: unless-stopped
     container_name: kdx-nginx
+    depends_on:
+      - web
+      - kdx_ws
+    logging: *default-logging

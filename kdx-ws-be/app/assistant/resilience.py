@@ -142,16 +142,34 @@ class LLMCircuitBreaker(CircuitBreaker):
 
 class IdempotencyManager:
     """
-    连接级幂等管理器 (落地 example/idempotent.py)
+    幂等管理器 (落地 example/idempotent.py)
 
-    生产环境应替换为 Redis SETNX + TTL；此处为单连接内存实现，
-    覆盖场景：前端重试/用户双击导致的同一 request_id 重复提交。
+    生产版: 优先 Redis SETNX + TTL (跨进程生效); Redis 不可用时回退内存。
+    覆盖场景: 前端重试/用户双击导致的同一 request_id 重复提交。
     """
 
-    def __init__(self, ttl_seconds: int = 1800, max_entries: int = 256):
+    def __init__(self, ttl_seconds: int = 1800, max_entries: int = 256,
+                 redis_url: Optional[str] = None):
         self._ttl = ttl_seconds
         self._max = max_entries
-        self._results: Dict[str, Dict[str, Any]] = {}
+        self._results: Dict[str, Dict[str, Any]] = {}  # 内存回退
+        self._redis = None
+        self._redis_url = redis_url
+
+    async def _get_redis(self):
+        """懒初始化 Redis 连接 (失败则永久回退内存)"""
+        if self._redis is not None:
+            return self._redis if self._redis is not False else None
+        if not self._redis_url:
+            self._redis = False
+            return None
+        try:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+            await self._redis.ping()
+        except Exception:
+            self._redis = False
+        return self._redis if self._redis is not False else None
 
     @staticmethod
     def tool_key(request_id: str, tool_name: str, args: Dict[str, Any]) -> str:
@@ -159,7 +177,18 @@ class IdempotencyManager:
                          sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(raw.encode()).hexdigest()
 
-    def get_cached(self, key: str) -> Optional[Dict[str, Any]]:
+    async def get_cached(self, key: str) -> Optional[Dict[str, Any]]:
+        """查缓存: 优先 Redis, 回退内存"""
+        # Redis 路径
+        r = await self._get_redis()
+        if r:
+            try:
+                cached = await r.get(f"idem:{key}")
+                if cached:
+                    return json.loads(cached)
+            except Exception:
+                pass
+        # 内存回退
         item = self._results.get(key)
         if not item:
             return None
@@ -168,9 +197,78 @@ class IdempotencyManager:
             return None
         return item["result"]
 
-    def save(self, key: str, result: Dict[str, Any]):
-        if len(self._results) >= self._max:  # 简单淘汰：清最旧一半
+    async def save(self, key: str, result: Dict[str, Any]):
+        """存缓存: 优先 Redis SETNX, 回退内存"""
+        payload = json.dumps(result, ensure_ascii=False, default=str)
+        # Redis 路径
+        r = await self._get_redis()
+        if r:
+            try:
+                await r.set(f"idem:{key}", payload, nx=True, ex=self._ttl)
+                return
+            except Exception:
+                pass
+        # 内存回退
+        if len(self._results) >= self._max:
             keys = sorted(self._results.keys(), key=lambda k: self._results[k]["ts"])
             for k in keys[: self._max // 2]:
                 del self._results[k]
         self._results[key] = {"ts": time.time(), "result": result}
+
+
+class RateLimiter:
+    """
+    速率限制器 (滑动窗口, Redis-backed)
+
+    生产版: Redis ZSET 滑动窗口 (跨进程生效, 精确到秒)
+    降级:   Redis 不可用时回退进程内滑动窗口 (单实例仍有效)
+    """
+
+    def __init__(self, redis_url: Optional[str] = None,
+                 max_calls: int = 30, window_seconds: int = 60):
+        self._redis_url = redis_url
+        self._max_calls = max_calls
+        self._window = window_seconds
+        self._redis = None
+        self._memory: Dict[str, list] = {}   # key -> [timestamps]
+
+    async def _get_redis(self):
+        if self._redis is not None:
+            return self._redis if self._redis is not False else None
+        if not self._redis_url:
+            self._redis = False
+            return None
+        try:
+            import redis.asyncio as aioredis
+            self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+            await self._redis.ping()
+        except Exception:
+            self._redis = False
+        return self._redis if self._redis is not False else None
+
+    async def allow(self, key: str) -> bool:
+        """判断 key (如 user:{id}) 是否允许通过限流"""
+        now = time.time()
+        r = await self._get_redis()
+        if r:
+            try:
+                import uuid
+                zkey = f"rl:{key}"
+                member = str(uuid.uuid4())
+                pipe = r.pipeline()
+                pipe.zremrangebyscore(zkey, 0, now - self._window)
+                pipe.zadd(zkey, {member: now})
+                pipe.zcard(zkey)
+                pipe.expire(zkey, self._window)
+                await pipe.execute()
+                count = await r.zcard(zkey)
+                return count <= self._max_calls
+            except Exception:
+                pass
+        # 内存回退 (滑动窗口)
+        ts_list = self._memory.setdefault(key, [])
+        ts_list[:] = [t for t in ts_list if t > now - self._window]
+        if len(ts_list) >= self._max_calls:
+            return False
+        ts_list.append(now)
+        return True
