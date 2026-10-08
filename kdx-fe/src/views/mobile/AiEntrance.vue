@@ -89,11 +89,11 @@
               <div class="ae-confirm-title">📋 待确认操作</div>
               <div v-for="(t, ci) in m.confirm.tools" :key="ci" class="ae-confirm-item">
                 <b>{{ toolLabel(t.name) }}</b>
-                <code>{{ JSON.stringify(t.args) }}</code>
+                <div class="ae-confirm-args" v-html="argsDisplay(t.name, t.args)" />
               </div>
               <div class="ae-confirm-actions">
-                <button class="ae-btn primary" @click="onConfirm(m.confirm.confirm_id, 'approve')">确认</button>
-                <button class="ae-btn" @click="onConfirm(m.confirm.confirm_id, 'reject')">取消</button>
+                <button class="ae-btn primary" :disabled="m.confirm.confirming" @click="onConfirm(m.confirm.confirm_id, 'approve')">{{ m.confirm.confirming ? '处理中…' : '确认' }}</button>
+                <button class="ae-btn" :disabled="m.confirm.confirming" @click="onConfirm(m.confirm.confirm_id, 'reject')">取消</button>
               </div>
             </div>
             <!-- 文本内容 -->
@@ -180,6 +180,7 @@
 <script>
 import { Toast } from 'vant'
 import { getToken } from '@/utils/auth'
+import { getChatHistory } from '@/api/ai'
 
 export default {
   name: 'AiEntrance',
@@ -249,7 +250,7 @@ export default {
     }
   },
   mounted() {
-    this.connect()
+    this.loadHistory().finally(() => this.connect())
   },
   beforeDestroy() {
     this.isDestroyed = true
@@ -258,6 +259,33 @@ export default {
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
   },
   methods: {
+    // ─── 加载聊天历史 ────────────────────
+    async loadHistory() {
+      try {
+        const res = await getChatHistory(50)
+        if (res.code === 200 && res.data && res.data.messages) {
+          const msgs = res.data.messages
+          this.messages = msgs.map(m => {
+            if (m.role === 'user') {
+              return { role: 'user', text: m.text, fromHistory: true }
+            }
+            // AI 消息: 恢复 text, toolEvents, confirm
+            return {
+              role: 'ai',
+              text: m.text || '',
+              toolEvents: (m.tool_events || []).map(t => ({ name: t.name, brief: t.brief || '完成', ok: t.ok })),
+              confirm: m.confirm || null,
+              streaming: false,
+              fromHistory: true
+            }
+          }).filter(m => m.text || (m.toolEvents && m.toolEvents.length) || m.confirm)
+          this.scrollToBottom()
+        }
+      } catch (e) {
+        // 历史加载失败不阻塞 WS 连接
+        console.warn('[AiEntrance] load history failed:', e)
+      }
+    },
     // ─── WS 连接 ────────────────────────
     getDefaultWsUrl() {
       const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
@@ -354,7 +382,8 @@ export default {
     handleEvent(p) {
       const type = p && p.type
       if (!type) return
-      const data = p.data || {}
+      // 后端协议为平铺格式: {type, request_id, answer, chunk, ...}
+      // 不嵌套在 data 字段里, 故直接从 p 取值
       if (type === 'connected' || type === 'pong') return
       if (type === 'voice_started') return
       if (type === 'cancel_ack') return // 后端确认取消，跳过
@@ -396,58 +425,95 @@ export default {
 
       if (type === 'intent_detected') {
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.intent = data.intent; if (data.confidence) m.confidence = data.confidence }
+        if (this.isCurrentMsg(m)) { m.intent = p.intent; if (p.confidence) m.confidence = p.confidence }
         return
       }
       if (type === 'tool_call') {
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.toolEvents = m.toolEvents || []; m.toolEvents.push({ name: data.name, brief: this.argsBrief(data.args), ok: null }) }
+        if (this.isCurrentMsg(m)) { m.toolEvents = m.toolEvents || []; m.toolEvents.push({ name: p.name, brief: this.argsBrief(p.args), ok: null }) }
         this.scrollToBottom(); return
       }
       if (type === 'tool_result') {
         const m = this.messages[this.streamingIdx]
         if (this.isCurrentMsg(m) && m.toolEvents && m.toolEvents.length) {
-          const t = m.toolEvents[m.toolEvents.length - 1]; t.ok = data.ok !== false; t.brief = this.resultBrief(data.result)
+          const t = m.toolEvents[m.toolEvents.length - 1]; t.ok = p.ok !== false; t.brief = this.resultBrief(p.result)
         }
         return
       }
       if (type === 'confirmation_request') {
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.confirm = { confirm_id: data.confirm_id, tools: data.tools || [] } }
+        if (this.isCurrentMsg(m)) {
+          m.confirm = { confirm_id: p.confirm_id, tools: p.tools || [] }
+          // 确认卡已到, 停止 "思考中" 动画 + 清 loading (用户需要点按钮)
+          m.streaming = false
+          this.loading = false
+        }
         this.scrollToBottom(); return
       }
       if (type === 'retrieve_done') {
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.toolEvents = m.toolEvents || []; m.toolEvents.push({ name: 'rag_retrieve', brief: `知识库检索 ${data.count || 0} 条`, ok: true }) }
+        if (this.isCurrentMsg(m)) { m.toolEvents = m.toolEvents || []; m.toolEvents.push({ name: 'rag_retrieve', brief: `知识库检索 ${p.count || 0} 条`, ok: true }) }
         return
       }
       if (type === 'agent_chunk' || type === 'generate_chunk') {
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.text = (m.text || '') + (data.chunk || data.text || ''); this.scrollToBottom() }
+        if (this.isCurrentMsg(m)) { m.text = (m.text || '') + (p.chunk || p.text || ''); this.scrollToBottom() }
         return
       }
       if (type === 'answer_done') {
         const m = this.messages[this.streamingIdx]
         if (this.isCurrentMsg(m)) {
-          if (!m.text && data.answer) m.text = data.answer
-          if (data.tool_trace && (!m.toolEvents || !m.toolEvents.length)) {
-            m.toolEvents = data.tool_trace.map(t => ({ name: t.name, brief: t.ok ? '完成' : '失败', ok: t.ok }))
+          if (!m.text && p.answer) m.text = p.answer
+          if (p.tool_trace && (!m.toolEvents || !m.toolEvents.length)) {
+            m.toolEvents = p.tool_trace.map(t => ({ name: t.name, brief: t.ok ? '完成' : '失败', ok: t.ok }))
           }
           m.streaming = false
         }
         return
       }
-      if (type === 'tts_chunk' && data.audio) { this.playTtsBase64(data.audio); return }
+      if (type === 'tts_chunk' && p.audio) { this.playTtsBase64(p.audio); return }
       if (type === 'query_done' || type === 'request_done') {
+        // stale_cancelled 是清理上一轮残留 interrupt, 不是当前 query 结束;
+        // 其 request_id 是新生成的 uuid, 与当前 request_id 不同。
+        // 不能据此清 loading / streaming, 否则后续 confirmation_request 挂不上
+        const route = p.route || ''
+        const rid = p.request_id || ''
+        if (route.includes('stale') || (rid && this.currentRequestId && rid !== this.currentRequestId)) {
+          return // 忽略: 不是当前 query 的 done
+        }
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.streaming = false }
+        if (this.isCurrentMsg(m)) {
+          m.streaming = false
+          // confirm 流程结束 (approve/reject 后的 query_done): 清除确认卡
+          if (m.confirm) m.confirm = null
+        }
         this.loading = false
         return
       }
       if (type === 'query_error' || type === 'error') {
+        // 同理: 非当前 request_id 的 error 不影响当前 loading 状态
+        const rid = p.request_id || ''
+        if (rid && this.currentRequestId && rid !== this.currentRequestId) {
+          return
+        }
+        const errMsg = p.error || '未知错误'
+        // pending write confirmation: 有待确认的操作未处理, 滚动到现有确认卡
+        if (errMsg.includes('pending') && errMsg.includes('confirm')) {
+          this.loading = false
+          // 找到带 confirm 的消息并滚动到它
+          const cidx = this.messages.findIndex(m => m.confirm)
+          if (cidx >= 0) {
+            this.$set(this.messages[cidx].confirm, 'confirming', false)
+            this.scrollToBottom()
+          }
+          return
+        }
         this.loading = false
+        // 确认流程出错: 恢复确认卡按钮 (去掉 "处理中")
+        const cidx2 = this.messages.findIndex(m => m.confirm)
+        if (cidx2 >= 0) this.$set(this.messages[cidx2].confirm, 'confirming', false)
         const m = this.messages[this.streamingIdx]
-        if (this.isCurrentMsg(m)) { m.text = m.text || `出错了: ${data.error || p.error || '未知错误'}`; m.streaming = false }
+        if (this.isCurrentMsg(m)) { m.text = m.text || `出错了: ${errMsg}`; m.streaming = false }
         return
       }
     },
@@ -492,8 +558,13 @@ export default {
     },
     onConfirm(confirmId, action) {
       if (!this.isWsOpen) return
-      const m = this.messages[this.streamingIdx]
-      if (m && m.confirm) { m.confirm = null; if (action === 'reject') { m.text = '已取消操作。'; m.streaming = false; this.loading = false } }
+      // 按 confirm_id 找到确认卡所在消息 (不依赖 streamingIdx)
+      const idx = this.messages.findIndex(m => m.confirm && m.confirm.confirm_id === confirmId)
+      if (idx < 0) return
+      const m = this.messages[idx]
+      // 标记为 "处理中", 禁用按钮, 但不清除 confirm (等后端响应)
+      this.$set(m.confirm, 'confirming', true)
+      this.loading = true
       this.ws.send(JSON.stringify({ type: 'confirm', confirm_id: confirmId, action }))
     },
 
@@ -639,6 +710,37 @@ export default {
       if (a.amount) p.push(`¥${a.amount}`)
       return p.join(' ') || '…'
     },
+    // 确认卡参数中文展示: 字段名 → 中文标签, 值 → 友好格式
+    argsDisplay(toolName, args) {
+      if (!args) return ''
+      const labels = {
+        feed_time: '时间', milk_volume: '奶量', feed_type: '方式',
+        temperature: '体温', measure_date: '日期', height: '身高', weight: '体重',
+        sleep_time: '入睡时间', wake_time: '醒来时间', duration: '时长',
+        stool_shape: '便便形状', status: '状态', diaper_type: '类型',
+        name: '名称', amount: '金额', expense_type: '收支',
+        order_time: '时间', tag: '标签',
+        title: '标题', todo_id: '待办ID', title_match: '标题匹配',
+        vaccine_id: '疫苗ID', actual_date: '接种日期',
+        description: '备注', note: '备注'
+      }
+      const feedTypeMap = { bottle: '瓶喂', breast: '亲喂', formula: '奶粉' }
+      const expenseTypeMap = { income: '收入', expense: '支出' }
+      const lines = []
+      for (const [k, v] of Object.entries(args)) {
+        if (v === null || v === undefined || v === '') continue
+        const label = labels[k] || k
+        let val = v
+        if (k === 'feed_type') val = feedTypeMap[v] || v
+        if (k === 'expense_type') val = expenseTypeMap[v] || v
+        // ISO 时间 → 友好显示
+        if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val)) {
+          val = val.replace('T', ' ').replace(/:\d{2}$/, m => '')
+        }
+        lines.push(`<span class="ae-arg-row"><span class="ae-arg-label">${label}</span><span class="ae-arg-val">${val}</span></span>`)
+      }
+      return lines.join('') || '<span class="ae-arg-val">无参数</span>'
+    },
     resultBrief(r) {
       if (!r) return '完成'
       try {
@@ -768,10 +870,10 @@ export default {
 .ae-confirm { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
 .ae-confirm-title { font-size: 13px; font-weight: 600; color: #92400e; margin-bottom: 8px; }
 .ae-confirm-item { font-size: 12px; color: #78716c; margin-bottom: 4px; }
-.ae-confirm-item code {
-  display: block; font-size: 11px; background: #fef3c7;
-  border-radius: 4px; padding: 4px 6px; margin-top: 2px; word-break: break-all;
-}
+.ae-confirm-args { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
+.ae-arg-row { display: flex; gap: 6px; align-items: baseline; }
+.ae-arg-label { color: #a8a29e; font-size: 11px; min-width: 3em; }
+.ae-arg-val { color: #1c1917; font-size: 12px; font-weight: 500; }
 .ae-confirm-actions { display: flex; gap: 8px; margin-top: 10px; }
 .ae-btn {
   flex: 1; padding: 8px 14px; border-radius: 8px;

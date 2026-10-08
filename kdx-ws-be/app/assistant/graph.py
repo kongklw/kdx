@@ -5,7 +5,8 @@ Baby Assistant 完整 LangGraph 实现 (生产版)
 - 全局编译图: 进程启动时编译一次, 节点不再闭包捕获 ws
 - contextvar 注入: emit 回调/身份通过 runtime.py 在运行时传递
 - LLM 网关: 所有 LLM 调用走 llm_gateway (多 profile 路由/熔断分桶/计量)
-- 原生 interrupt: 写操作 HITL 用 LangGraph interrupt() 暂停, checkpointer 持久化
+- 原生 interrupt: 写操作 HITL 在独立纯函数节点 confirm 中 interrupt() 暂停
+  (与 LLM 决策解耦 — resume 重放节点时确定性返回恢复值, 不会重复调 LLM)
 - ReAct 上限: route_after_agent 检查 tool_rounds, 超限走 give_up
 - 统一 RAG: rag 节点改用 RetrievalService (混合检索), 不再内联纯向量
 - to_thread: 所有同步 IO (SQLAlchemy/embedding/BM25) 包裹, 不阻塞事件循环
@@ -19,15 +20,19 @@ Baby Assistant 完整 LangGraph 实现 (生产版)
            ▼               ▼                  ▼
      ┌──────────┐   ┌───────────┐     ┌───────────┐
      │  agent   │   │    rag    │     │  chitchat │
-     │(ReAct循环)│   │(统一检索) │    │ (流式闲聊) │
+     │(LLM 决策)│   │(统一检索) │     │ (流式闲聊) │
      └────┬─────┘   └─────┬─────┘     └─────┬─────┘
+          ▼               │                 │
+     ┌──────────┐         │                 │
+     │ confirm  │  写操作→interrupt暂停 (纯函数节点, 无 LLM, 重放确定)
+     └────┬─────┘         │                 │
    route_after_agent      │                 │
     ┌──────┼──────────┐   │                 │
     ▼      ▼          ▼   ▼                 ▼
  ┌──────┐ ┌───────┐ ┌──────┐
- │tools │ │interrupt│ │ end  │  interrupt=HITL暂停(checkpointer持久化)
- └──┬───┘ └───┬───┘ └──┬───┘  end=agent已直接回答
-    └────────▶│       │  tools 完成回到 agent 继续推理
+ │tools │ │give_up│ │ end  │  reject→end(已取消) / 无写操作直接放行
+ └──┬───┘ └───┬───┘ └──┬───┘  tools 完成回到 agent 继续推理
+    └────────▶│       │
               ▼       ▼
              END     END
 """
@@ -290,9 +295,12 @@ def route_after_intent(state: AssistantState) -> Literal["agent", "rag", "chitch
 # ── 数据 Agent 节点 (Function Calling ReAct 循环) ──────────────
 
 async def agent_node(state: AssistantState) -> Dict[str, Any]:
-    """Agent 节点: LLM 决策 (带工具绑定), 输出 tool_calls 或直接回答"""
+    """Agent 节点: LLM 决策 (带工具绑定), 输出 tool_calls 或直接回答。
+
+    注意: 本节点不含 interrupt() — HITL 在 confirm_node (纯函数) 中处理,
+    避免 resume 重放节点时重复调用 LLM / 决策漂移。
+    """
     SystemMessage = _init_lc()["SystemMessage"]
-    interrupt_fn = _init_lc()["interrupt"]
     registry = get_registry()
     schemas = registry.get_schemas_for_llm()
 
@@ -305,7 +313,9 @@ async def agent_node(state: AssistantState) -> Dict[str, Any]:
         f"{state.get('baby_context', '')}\n"
         "规则:\n"
         "1. 数据查询/记录必须调用对应工具，不要编造数据\n"
-        "2. 用户想记录数据但缺少必要参数时，先追问补全再调用工具\n"
+        "2. 记录类输入信息不全时用默认值补全后直接调用写工具: 时间默认现在;"
+        "喂奶类型未说明默认 bottle; 确认卡片会展示全部参数(含默认时间), "
+        "用户可在确认时修改或指定时间。只有缺少关键数值(奶量/体温/金额等)时才追问\n"
         "3. 拿到工具结果后，用简洁友好的中文总结给用户\n"
         "4. 一次只调用必要的工具\n"
     )
@@ -332,38 +342,88 @@ async def agent_node(state: AssistantState) -> Dict[str, Any]:
             "messages": (messages + [AIMessage(content=answer)])[-MAX_MEMORY_MESSAGES:],
         }
 
-    # 有工具调用 → 检查写操作 HITL
-    write_calls = [c for c in tool_calls if registry.is_write_tool(c["name"])]
-    if write_calls:
-        import uuid
-        confirm_id = f"CFM-{uuid.uuid4().hex}"
-        # 原生 interrupt: 图暂停, checkpointer 持久化状态
-        decision = interrupt_fn({
-            "confirm_id": confirm_id,
-            "tools": [
-                {"name": c["name"], "args": c["args"],
-                 "description": (registry.get(c["name"]).description if registry.get(c["name"]) else c["name"])}
-                for c in write_calls
-            ],
-            "message": "即将写入宝宝数据，请确认",
-        })
-        # 用户 reject → 直接取消
-        if decision.get("action") == "reject":
-            AIMessage = _init_lc()["AIMessage"]
-            answer = "好的，已取消本次操作。"
-            return {
-                "answer": answer,
-                "tool_calls": None,
-                "messages": (messages + [AIMessage(content=answer)])[-MAX_MEMORY_MESSAGES:],
-            }
-        # approve → 继续执行 (可带用户修改后的参数)
-        # 如果用户修改了参数, decision 里会带 modified_args
-        if decision.get("modified_args"):
-            for c in tool_calls:
-                if c["name"] in decision["modified_args"]:
-                    c["args"].update(decision["modified_args"][c["name"]])
+    # 有工具调用 → 交由 confirm 节点做 HITL 确认门 (读操作直接放行)
+    return {"tool_calls": tool_calls}
 
-    # 执行工具 (读操作 + 已确认的写操作)
+
+# 写工具的时间类参数 → 缺省解析值 ("now_dt"=现在时刻, "today"=今天日期)
+_TIME_PARAM_DEFAULTS = {
+    "feed_time": "now_dt", "sleep_time": "now_dt", "use_date": "now_dt",
+    "order_time": "now_dt", "actual_date": "today", "measure_date": "today",
+    "day": "today",
+}
+
+
+def _confirm_summary(write_calls) -> str:
+    """把待执行的写操作渲染成人读摘要; 时间类参数缺省时显式展示 '现在' 值。
+
+    用户需求: 说'喝奶150ml'后, 确认卡片要能回答 '是现在时间吗, 还是指定时间?' —
+    因此默认时间必须出现在确认消息里, 而不是藏在工具内部。
+    """
+    from datetime import datetime
+    registry = get_registry()
+    now = datetime.now()
+    lines = []
+    for c in write_calls:
+        args = c.get("args") or {}
+        meta = registry.get(c["name"])
+        declared = set(((meta.parameters if meta else None) or {}).get("properties") or {})
+        parts = [f"{k}={v}" for k, v in args.items() if v not in (None, "")]
+        defaults = [
+            f"{k}=现在({now:%H:%M})" if mode == "now_dt" else f"{k}=今天({now:%Y-%m-%d})"
+            for k, mode in _TIME_PARAM_DEFAULTS.items()
+            if not args.get(k) and k in declared
+        ]
+        detail = "，".join(parts + defaults) or "无参数"
+        lines.append(f"· {c['name']}: {detail}")
+    return "\n".join(lines)
+
+
+async def confirm_node(state: AssistantState) -> Dict[str, Any]:
+    """HITL 确认门 (纯函数节点): state.tool_calls 含写操作时 interrupt() 暂停。
+
+    为什么单独拆节点: LangGraph resume 时会从头重放 interrupt 所在节点,
+    若节点内含 LLM 调用则重放结果不确定 (可能不再产生相同 tool_calls)。
+    本节点只读 state + interrupt(), 重放是确定性的 → 恢复值稳定返回。
+    """
+    registry = get_registry()
+    interrupt_fn = _init_lc()["interrupt"]
+    AIMessage = _init_lc()["AIMessage"]
+
+    tool_calls = list(state.get("tool_calls") or [])
+    write_calls = [c for c in tool_calls if registry.is_write_tool(c["name"])]
+    if not write_calls:
+        return {}  # 纯读操作: 直接放行
+
+    import uuid
+    confirm_id = f"CFM-{uuid.uuid4().hex}"
+    # 原生 interrupt: 图暂停, checkpointer 持久化状态
+    decision = interrupt_fn({
+        "confirm_id": confirm_id,
+        "tools": [
+            {"name": c["name"], "args": c["args"],
+             "description": (registry.get(c["name"]).description if registry.get(c["name"]) else c["name"])}
+            for c in write_calls
+        ],
+        "message": ("即将写入宝宝数据，请确认"
+                    "（时间未指定时默认为现在，可在确认时修改）:\n"
+                    + _confirm_summary(write_calls)),
+    })
+    # 用户 reject → 直接取消
+    if decision.get("action") == "reject":
+        answer = "好的，已取消本次操作。"
+        return {
+            "answer": answer,
+            "tool_calls": None,
+            "messages": (list(state.get("messages") or [])
+                         + [AIMessage(content=answer)])[-MAX_MEMORY_MESSAGES:],
+        }
+    # approve → 继续执行 (可带用户修改后的参数)
+    # 如果用户修改了参数, decision 里会带 modified_args
+    if decision.get("modified_args"):
+        for c in tool_calls:
+            if c["name"] in decision["modified_args"]:
+                c["args"].update(decision["modified_args"][c["name"]])
     return {"tool_calls": tool_calls}
 
 
@@ -666,6 +726,7 @@ def build_assistant_graph(checkpointer=None):
     # 注册节点 (plain functions, 不再工厂闭包)
     workflow.add_node("entry", entry_node)
     workflow.add_node("agent", agent_node)
+    workflow.add_node("confirm", confirm_node)
     workflow.add_node("tools", tool_exec_node)
     workflow.add_node("rag", rag_node)
     workflow.add_node("chitchat", chitchat_node)
@@ -682,12 +743,13 @@ def build_assistant_graph(checkpointer=None):
         "fallback": "fallback",
     })
 
-    # ReAct 循环核心: agent → (tools | give_up | end)
-    # interrupt 暂停由 checkpointer 处理, 恢复时自动继续 agent 之后的逻辑
-    workflow.add_conditional_edges("agent", route_after_agent, {
+    # ReAct 循环核心: agent → confirm (HITL 门) → (tools | give_up | end)
+    # interrupt 暂停发生在 confirm 节点 (纯函数), 恢复重放确定性
+    workflow.add_edge("agent", "confirm")
+    workflow.add_conditional_edges("confirm", route_after_agent, {
         "tools": "tools",
         "give_up": "give_up",
-        "end": END,                # agent 已直接回答 (无工具 / 工具后总结)
+        "end": END,                # agent 已直接回答 (无工具 / 工具后总结 / reject 已取消)
     })
 
     workflow.add_edge("tools", "agent")   # ReAct: 工具执行完回 agent 总结
@@ -704,11 +766,37 @@ def build_assistant_graph(checkpointer=None):
 # ──────────────────────────────────────────────
 
 _compiled_graph = None
+_checkpointer = None
+
+
+def init_graph_checkpointer() -> str:
+    """初始化 checkpointer: Redis 优先, 失败回退 MemorySaver (启动早期调用)。
+
+    必须在 main.py include_router 之前同步调用 — 路由工厂在 import 期
+    就会 get_compiled_graph() 编图, 晚了会捕获到 MemorySaver。
+    Redis 为纯社区版 6.2 (无 RediSearch), 用自研 RedisCheckpointer 而非官方包。
+    """
+    global _checkpointer
+    try:
+        from ..core.config import get_settings
+        from .redis_checkpointer import RedisCheckpointer
+        cp = RedisCheckpointer(redis_url=get_settings().redis_url)
+        cp.ping()
+        _checkpointer = cp
+        logger.info("[assistant_graph] checkpointer=RedisCheckpointer "
+                    f"(redis={get_settings().redis_url.split('@')[-1]})")
+        return "redis"
+    except Exception as e:
+        from langgraph.checkpoint.memory import MemorySaver
+        _checkpointer = MemorySaver()
+        logger.warning(f"[assistant_graph] Redis checkpointer 不可用 "
+                       f"({type(e).__name__}: {e}), 回退 MemorySaver (进程内)")
+        return "memory"
 
 
 def get_compiled_graph():
     """获取进程级共享编译图 (启动时编译一次)"""
     global _compiled_graph
     if _compiled_graph is None:
-        _compiled_graph = build_assistant_graph()
+        _compiled_graph = build_assistant_graph(_checkpointer)
     return _compiled_graph

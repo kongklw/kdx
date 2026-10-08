@@ -308,7 +308,7 @@ async def baby_assistant_websocket(ws: WebSocket, settings: Settings) -> None:
                     continue
                 if await load_pending():
                     await send_event("query_error", {
-                        "error": "pending write confirmation, please approve/reject first"})
+                        "error": "有待确认的操作未处理，请先确认或取消"})
                     continue
                 if processing:
                     await send_event("query_error", {"error": "busy: previous query in progress"})

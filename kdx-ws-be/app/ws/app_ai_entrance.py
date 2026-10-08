@@ -1,15 +1,43 @@
 '''
-应用的AI 主入口。
+应用的AI 主入口 (agent + rag + chitchat 全部经此路由)。
 实现语音和文字 输入,所有app 实现agent化。
 
 本文件仅负责 WS 接入流程与业务分发; WS 生产级基础设施 (鉴权/连接管理/协议/心跳)
 统一复用 app.core.ws, 其他 WS 接口直接复用, 无需重写。
+AI 编排 (意图路由 → agent工具调用 / RAG知识问答 / chitchat) 在 service 层
+(services/assistant_service.py AssistantSession + assistant/graph.py),
+本路由层只做协议分发。RAG 不需要单独接入口: 意图为 knowledge_qa 时图内
+自动走 rag_node (retrieve_start/retrieve_done/流式回答), 事件协议同下。
+
+协议 (平铺格式, 与本文件既有事件一致):
+
+Client → Server:
+  {"type":"start","codec":...,"sample_rate":...}                        语音会话握手
+  二进制 PCM 帧 (16bit/16k/mono)                                        语音流
+  {"type":"end","audio_bytes":N}                                        语音结束
+  {"type":"query","query":"...","request_id":"..."}                     文字查询
+  {"type":"confirm","confirm_id":"CFM-...","action":"approve"|"reject"} 写操作确认 (HITL)
+  {"type":"ping"}
+
+Server → Client:
+  connected / pong / voice_started / query_received / error
+  stt_chunk / stt_output                      (ASR, event_to_dict)
+  intent_start / intent_detected              (图: 意图识别)
+  retrieve_start / retrieve_done              (图: RAG 检索)
+  tool_call / tool_result                     (图: 工具调用)
+  confirmation_request {confirm_id,tools,...} (图: HITL 写确认, 等待 confirm)
+  generate_chunk / answer_done                (流式回答)
+  query_done / query_error                    (单次 query 结束/失败)
+
+注意: 语音会话期间 (processing=True) confirm 会被 busy 拒绝;
+pending_confirm 为连接级状态, 断线残留的 interrupt 会在下个连接的新 query 前自动取消;
+query/语音会话启动受每用户速率限制 (30/min 滑动窗口, Redis-backed)。
 '''
 import asyncio
 import contextlib
 import os
 import uuid
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, WebSocket
 from fastapi.websockets import WebSocketDisconnect
@@ -26,21 +54,30 @@ from ..core.ws import (
     receive_message,
     safe_send_json,
 )
+from ..assistant.resilience import RateLimiter
+from ..services.assistant_service import AssistantSession
 from ..utils.event import event_to_dict
 from ..voice.asr import DashscopeRealtimeASR
+from ..services.chat_history_service import ChatHistoryService
+
+RATE_LIMIT_CALLS = 30         # 每用户每分钟 query 上限 (文字按条, 语音按会话)
 
 
 def create_app_ai_entrance_router(settings: Settings):
     router = APIRouter()
+    # 进程级速率限制器: Redis 滑动窗口 (跨连接/跨请求生效);
+    # Redis 不可用时自动回退进程内窗口 (单实例仍有效) — 故不能每连接新建
+    limiter = RateLimiter(redis_url=settings.redis_url,
+                          max_calls=RATE_LIMIT_CALLS, window_seconds=60)
 
     @router.websocket("/ws/app-ai-entrance")
     async def connect_on(ws: WebSocket):
-        await app_ai_entrance_ws(ws, settings)
+        await app_ai_entrance_ws(ws, settings, limiter)
 
     return router
 
 
-async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
+async def app_ai_entrance_ws(ws: WebSocket, settings: Settings, limiter: RateLimiter):
     '''
     步骤
     1. jwt 鉴权 (复用 core.ws.authenticate)
@@ -61,11 +98,11 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
         logger.warning(f"[app_ai_entrance] rejected: conn limit reached user={user_id}")
         return
 
-    '''
-    此处用 user_id 拼接起来的thread_id对吗？
-    疑问点1: 一个用户进行多轮对话，langgraph 需要一个thread_id 来运行图，进行interrupt 和 resume 
-    如果都是一样的thread_id 那么就会resume 或者 time travel 很多次对话吧。
-    '''
+    # thread_id = user-{user_id}: 每用户一个 thread (与 baby_assistant.py 一致),
+    # 多轮记忆跨连接保留 (checkpointer 承载)。结论: 同一 thread_id 不会导致
+    # 多次 resume / time travel — 每次 ainvoke 只是向该 thread 追加一个新 checkpoint;
+    # interrupt 恢复仅发生在显式 Command(resume=...) 时, 由 AssistantSession 的
+    # pending_confirm 状态机管理 (见 services/assistant_service.py)。
     thread_id = f"user-{user_id}"
 
     # ── 3. accept + 进入消息循环 (finally 释放连接计数) ─────────
@@ -76,6 +113,34 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
         "message": "app ai entrance already",
     })
     logger.info(f"[app_ai_entrance] connected user={user_id}")
+
+    # ── AI 会话 (service 层): 图执行 + HITL 确认, 事件平铺下发 ──
+    _chat_history = ChatHistoryService.get_instance()
+
+    async def send_agent_event(event_type: str, data: Dict[str, Any]) -> None:
+        await safe_send_json(ws, {"type": event_type, **data})
+        # 拦截关键事件 → 持久化 AI 消息到聊天历史
+        rid = data.get("request_id", "")
+        if event_type == "answer_done":
+            await _chat_history.save_message(user_id, {
+                "role": "ai",
+                "text": data.get("answer", ""),
+                "tool_events": data.get("tool_trace", []),
+                "request_id": rid,
+            })
+        elif event_type == "confirmation_request":
+            await _chat_history.save_message(user_id, {
+                "role": "ai",
+                "text": "",
+                "confirm": {
+                    "confirm_id": data.get("confirm_id"),
+                    "tools": data.get("tools", []),
+                },
+                "request_id": rid,
+            })
+
+    session = AssistantSession(user_id=user_id, thread_id=thread_id,
+                               emit=send_agent_event)
 
     # ── 业务状态 + 归一化处理 (文字 / 语音 → 统一文本 query) ──────────
     # 设计: 无论语音还是文本输入, 最终都转换成文本 query, 再走同一个 handle。
@@ -92,7 +157,7 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
         """统一文本 query 入口 (文字直出 / 语音 ASR 转写后调用)。
 
         文字: 直接来自 payload["query"]; 语音: 来自 DashScope ASR 句尾定稿。
-        本步骤止于 "归一化到 query"; 后续 agent 执行在此接入 (TODO)。
+        归一化后送 service 层 AssistantSession 执行 agent (意图识别 + 工具调用)。
         """
         print(f'handel query -> {query}, id: {request_id} , source: {source}')
         query = (query or "").strip()
@@ -116,7 +181,21 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
             "source": source,  # "text" | "voice"
             "thread_id": thread_id,
         })
-        # ── TODO: agent 执行 (意图识别 + 工具调用) 在此实现 ──
+        # 持久化用户消息到聊天历史
+        await _chat_history.save_message(user_id, {
+            "role": "user",
+            "text": query,
+            "request_id": request_id,
+            "source": source,
+        })
+        # ── agent 执行: 意图识别 + 工具调用 (编排在 service 层 AssistantSession) ──
+        if session.pending_confirm:
+            await safe_send_json(ws, {
+                "type": "error",
+                "error": "有待确认的操作未处理，请先确认或取消",
+            })
+            return
+        await session.run_query(query, request_id)
 
 
 
@@ -298,6 +377,13 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
 
             # 文字查询: {"type":"query","query":...,"request_id":...}
             if payload is not None and payload.get("type") == "query":
+                # 速率限制 (每用户滑动窗口, 与语音共用配额)
+                if not await limiter.allow(f"user:{user_id}"):
+                    await safe_send_json(ws, {
+                        "type": "error",
+                        "error": f"rate limit exceeded ({RATE_LIMIT_CALLS}/min)",
+                    })
+                    continue
                 if processing:
                     await safe_send_json(ws, {
                         "type": "error", "error": "busy: previous query in progress",
@@ -312,9 +398,32 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings):
                     processing = False
                 continue
 
+            # 写操作确认 (HITL): {"type":"confirm","confirm_id":...,"action":"approve"|"reject"}
+            # 从图 interrupt 暂停点恢复; 语音会话期间 processing=True 会被 busy 拒绝
+            if payload is not None and payload.get("type") == "confirm":
+                if processing:
+                    await safe_send_json(ws, {"type": "error", "error": "busy"})
+                    continue
+                processing = True
+                try:
+                    await session.resolve_confirm(
+                        payload.get("confirm_id") or "",
+                        payload.get("action") or "reject",
+                    )
+                finally:
+                    processing = False
+                continue
+
             # 语音帧: 原始 PCM 二进制 → 喂给流式 ASR (首帧开启语音会话)
             if audio is not None:
                 if not voice_mode and not processing:
+                    # 语音会话启动也消耗限流配额 (整个会话计 1 次, 句尾定稿不再重复计)
+                    if not await limiter.allow(f"user:{user_id}"):
+                        await safe_send_json(ws, {
+                            "type": "error",
+                            "error": f"rate limit exceeded ({RATE_LIMIT_CALLS}/min)",
+                        })
+                        continue
                     voice_mode = True
                     processing = True
                     audio_queue = asyncio.Queue()

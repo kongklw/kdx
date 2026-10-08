@@ -38,6 +38,9 @@ class FeedMilkRow(DjangoBase):
     milk_volume: Mapped[int] = mapped_column(Integer)
     feed_type: Mapped[str] = mapped_column(String(20), default="bottle")
     duration_total: Mapped[int] = mapped_column(Integer, default=0)
+    # Django 同库表中 NOT NULL 无默认值的列, 工具未提供时补 0 (错误 1364)
+    left_duration: Mapped[int] = mapped_column(Integer, default=0)
+    right_duration: Mapped[int] = mapped_column(Integer, default=0)
     note: Mapped[str] = mapped_column(Text, nullable=True)
 
 
@@ -84,6 +87,8 @@ class BabyExpenseRow(DjangoBase):
     amount: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     tag: Mapped[str] = mapped_column(String(100), nullable=True)
     expense_type: Mapped[str] = mapped_column(String(10), default="expense")
+    create_time: Mapped[date] = mapped_column(Date, default=date.today)
+    update_time: Mapped[date] = mapped_column(Date, default=date.today)
 
 
 class GrowthRecordRow(DjangoBase):
@@ -95,6 +100,8 @@ class GrowthRecordRow(DjangoBase):
     height_cm: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=True)
     weight_kg: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=True)
     head_circumference_cm: Mapped[Decimal] = mapped_column(Numeric(5, 1), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class BabyVaccineRecordRow(DjangoBase):
@@ -110,6 +117,8 @@ class BabyVaccineRecordRow(DjangoBase):
     recommend_date: Mapped[date] = mapped_column(Date)
     done: Mapped[bool] = mapped_column(Integer, default=0)  # Django Boolean → tinyint
     actual_date: Mapped[date] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class BirthdayRecordRow(DjangoBase):

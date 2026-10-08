@@ -22,6 +22,17 @@ class Settings:
     redis_url: str
     mysql_dsn: str
     allow_anon_ws: bool
+    # 文件存储根目录 (对应 Django MEDIA_ROOT, 即 kdx-be/media/), 可用 MEDIA_ROOT 环境变量覆盖
+    media_root: str = ""
+    # MinIO/S3 直传配置 (与老 Django .env 同名变量; 未启用时 presign 端点返回 S3 media not enabled)
+    use_s3_media: bool = False
+    minio_endpoint_url: str = ""
+    minio_public_endpoint_url: str = ""
+    minio_bucket_name: str = ""
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_region_name: str = "us-east-1"
+    minio_verify_ssl: bool = True
 
 
 def get_settings() -> Settings:
@@ -51,10 +62,27 @@ def get_settings() -> Settings:
 
     allow_anon_ws = (os.getenv("VOICE_WS_ALLOW_ANON") or "").lower() in {"1", "true", "yes"}
 
+    # 文件存储: 默认指向老 Django 项目 MEDIA_ROOT 同一磁盘目录 (kdx-be/media/)
+    media_root = os.getenv("MEDIA_ROOT") or str(_BASE_DIR.parent / "kdx-be" / "media")
+
+    # MinIO/S3 配置 (变量名与老 Django settings 保持一致)
+    use_s3_media = (os.getenv("USE_S3_MEDIA") or "").lower() in {"1", "true", "yes"}
+    minio_endpoint_url = os.getenv("MINIO_ENDPOINT_URL") or ""
+    minio_public_endpoint_url = os.getenv("MINIO_PUBLIC_ENDPOINT_URL") or minio_endpoint_url
+
     return Settings(
         secret_key=secret_key,
         jwt_algorithm=jwt_algorithm,
         redis_url=redis_url,
         mysql_dsn=mysql_dsn,
         allow_anon_ws=allow_anon_ws,
+        media_root=media_root,
+        use_s3_media=use_s3_media,
+        minio_endpoint_url=minio_endpoint_url,
+        minio_public_endpoint_url=minio_public_endpoint_url,
+        minio_bucket_name=os.getenv("MINIO_BUCKET_NAME") or "",
+        minio_access_key=os.getenv("MINIO_ACCESS_KEY") or "",
+        minio_secret_key=os.getenv("MINIO_SECRET_KEY") or "",
+        minio_region_name=os.getenv("MINIO_REGION_NAME") or "us-east-1",
+        minio_verify_ssl=(os.getenv("MINIO_VERIFY_SSL") or "true").lower() in {"1", "true", "yes"},
     )

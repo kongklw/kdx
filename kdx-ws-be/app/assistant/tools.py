@@ -182,6 +182,52 @@ def make_tools(repo_factory=_repo):
     def query_birthdays(user_id: int, days: int = 60, request_id: str = "") -> dict:
         return {"records": repo_factory().query_birthdays(user_id, int(days or 60))}
 
+    # ── 待办 (与 HTTP /todos 共用 TodoService 存储: TODO_REPO=redis 时同一份 Redis 数据) ──
+
+    def _todo_service():
+        """进程级缓存 (与 HTTP 路由同构): InMemory 仓库按调用新建会互相看不见"""
+        if not hasattr(_todo_service, "_svc"):
+            from ..core.config import get_settings
+            from ..integrations.todo_repo import create_todo_repository
+            from ..services.todo_service import TodoService
+            _todo_service._svc = TodoService(create_todo_repository(get_settings()))
+        return _todo_service._svc
+
+    def _todo_brief(t) -> dict:
+        return {"id": t.id, "title": t.title, "completed": t.completed}
+
+    def query_todos(user_id: int, only_pending: bool = False, request_id: str = "") -> dict:
+        items = _todo_service().list_items(str(user_id))
+        if only_pending:
+            items = [x for x in items if not x.completed]
+        return {"total": len(items),
+                "todos": [_todo_brief(x) for x in items]}
+
+    def add_todo(user_id: int, title: str, request_id: str = "") -> dict:
+        from ..schemas.todo import TodoCreateRequest
+        item = _todo_service().create_item(str(user_id), TodoCreateRequest(title=title))
+        return {"ok": True, "message": "待办已创建", "todo": _todo_brief(item)}
+
+    def complete_todo(user_id: int, todo_id: str = "", title_match: str = "",
+                      completed: bool = True, request_id: str = "") -> dict:
+        """按 id 或标题模糊匹配完成待办 (LLM 拿到的常是标题而非 uuid)"""
+        from ..schemas.todo import TodoUpdateRequest
+        svc = _todo_service()
+        uid = str(user_id)
+        if not todo_id and title_match:
+            matches = [x for x in svc.list_items(uid)
+                       if title_match in x.title and x.completed != bool(completed)]
+            if not matches:
+                return {"ok": False,
+                        "message": f"未找到标题含'{title_match}'的待办"}
+            todo_id = matches[0].id
+        try:
+            item = svc.update_item(uid, todo_id,
+                                   TodoUpdateRequest(completed=bool(completed)))
+        except KeyError:
+            return {"ok": False, "message": "待办不存在，可先用 query_todos 查询"}
+        return {"ok": True, "todo": _todo_brief(item)}
+
     return {
         "get_baby_info": get_baby_info,
         "query_feed_milk": query_feed_milk,
@@ -199,6 +245,9 @@ def make_tools(repo_factory=_repo):
         "query_vaccines": query_vaccines,
         "mark_vaccine_done": mark_vaccine_done,
         "query_birthdays": query_birthdays,
+        "query_todos": query_todos,
+        "add_todo": add_todo,
+        "complete_todo": complete_todo,
     }
 
 
@@ -336,6 +385,30 @@ def register_baby_tools(registry: ToolRegistry) -> None:
         "query_birthdays", "查询未来N天内(默认60)的家庭生日提醒，含倒计天数。",
         {"type": "object", "properties": {"days": {"type": "integer"}}, "required": []},
         t["query_birthdays"], is_write=False, tags=["birthday"],
+    ))
+    registry.register(ToolMeta_for(
+        "query_todos", "查询待办事项列表。only_pending=true 只看未完成的。",
+        {"type": "object", "properties": {"only_pending": {"type": "boolean"}}, "required": []},
+        t["query_todos"], is_write=False, tags=["todo"],
+    ))
+    registry.register(ToolMeta_for(
+        "add_todo", "新建一条待办事项。title 必填，如'明天带宝宝打疫苗'。",
+        {"type": "object",
+         "properties": {"title": {"type": "string", "description": "待办内容"}},
+         "required": ["title"]},
+        t["add_todo"], is_write=True, tags=["todo"],
+    ))
+    registry.register(ToolMeta_for(
+        "complete_todo", "完成(或取消完成)一条待办。todo_id 与 title_match 二选一，"
+                         "title_match 为待办标题中的关键词。",
+        {"type": "object",
+         "properties": {
+             "todo_id": {"type": "string", "description": "待办 id (可从 query_todos 获取)"},
+             "title_match": {"type": "string", "description": "标题关键词, 如'打疫苗'"},
+             "completed": {"type": "boolean", "description": "true=完成, false=取消完成, 默认 true"},
+         },
+         "required": []},
+        t["complete_todo"], is_write=True, tags=["todo"],
     ))
 
 
