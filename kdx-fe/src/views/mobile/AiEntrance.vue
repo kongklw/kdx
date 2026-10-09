@@ -269,16 +269,22 @@ export default {
             if (m.role === 'user') {
               return { role: 'user', text: m.text, fromHistory: true }
             }
-            // AI 消息: 恢复 text, toolEvents, confirm
+            // AI 消息: 恢复 text, toolEvents; 历史 confirm 已过期, 不渲染按钮
+            let text = m.text || ''
+            const confirm = null
+            if (m.confirm) {
+              // 历史 confirm 卡片: 保留信息但标记过期, 不显示按钮
+              text = text || '📋 待确认操作（会话已结束）'
+            }
             return {
               role: 'ai',
-              text: m.text || '',
+              text,
               toolEvents: (m.tool_events || []).map(t => ({ name: t.name, brief: t.brief || '完成', ok: t.ok })),
-              confirm: m.confirm || null,
+              confirm,
               streaming: false,
               fromHistory: true
             }
-          }).filter(m => m.text || (m.toolEvents && m.toolEvents.length) || m.confirm)
+          }).filter(m => m.text || (m.toolEvents && m.toolEvents.length))
           this.scrollToBottom()
         }
       } catch (e) {

@@ -5,6 +5,7 @@ export function getChatHistory(limit = 50) {
   return request({
     url: '/api/v1/ai/chat-history',
     method: 'get',
-    params: { limit }
+    params: { limit },
+    baseURL: '/prod-ai' // 走 FastAPI 代理 (非 Django 的 /dev-api)
   })
 }

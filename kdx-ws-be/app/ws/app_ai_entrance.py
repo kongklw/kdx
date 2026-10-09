@@ -138,6 +138,13 @@ async def app_ai_entrance_ws(ws: WebSocket, settings: Settings, limiter: RateLim
                 },
                 "request_id": rid,
             })
+        elif event_type == "query_error":
+            # 查询出错也保存 AI 侧消息, 确保历史中用户消息总有对应回复
+            await _chat_history.save_message(user_id, {
+                "role": "ai",
+                "text": f"⚠️ {data.get('error', '处理失败')}",
+                "request_id": rid,
+            })
 
     session = AssistantSession(user_id=user_id, thread_id=thread_id,
                                emit=send_agent_event)
