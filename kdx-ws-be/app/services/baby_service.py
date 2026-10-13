@@ -48,6 +48,7 @@ from ..models.baby import (
     UserAppOrder,
     VaccineDefinition,
 )
+from ..models.upload import MediaAsset
 
 logger = logging.getLogger(__name__)
 
@@ -1384,9 +1385,40 @@ def album_list(db: Session, user_id: int, page_num: int, page_size: int) -> dict
     }
 
 
+def _parse_media_asset_ids(raw) -> list[int]:
+    """media_asset_ids 宽容解析: JSON 数组 / 逗号分隔字符串 / 单个 id (与 DRF 行为对齐)"""
+    if raw in (None, "", []):
+        return []
+    if isinstance(raw, list):
+        ids = raw
+    else:
+        s = str(raw).strip()
+        if s.startswith("["):
+            try:
+                ids = json.loads(s)
+            except Exception:
+                ids = []
+        else:
+            ids = [t for t in s.replace("，", ",").split(",") if t.strip()]
+    out = []
+    for i in ids:
+        try:
+            out.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def album_create(db: Session, user_id: int, data: dict, files: list) -> dict:
-    """创建相册; multipart 上传的图片/视频落盘 MEDIA_ROOT/baby_album/ 并建照片行"""
+    """创建相册; 两条照片来源 (与 Django album_views.BabyAlbumView.post 一致):
+    1. multipart 文件 (images/file 字段) — 仅本地存储模式; S3 模式下要求走 MinIO 直传
+    2. media_asset_ids — MinIO 直传完成后 (presign init→PUT→complete) 的资产 id 绑定
+    """
     try:
+        # S3 模式下 multipart 直接拒绝 (与 Django USE_S3_MEDIA 分支一致), 且要在建相册前拒绝避免孤儿记录
+        if files and (os.getenv("USE_S3_MEDIA") or "").lower() in {"1", "true", "yes"}:
+            return {"code": 400, "msg": "请使用 MinIO 直传上传", "data": None}
+
         tags = data.get("tags")
         if isinstance(tags, str):
             try:
@@ -1407,15 +1439,37 @@ def album_create(db: Session, user_id: int, data: dict, files: list) -> dict:
         db.commit()
         db.refresh(album)
 
-        for f in files:
-            filename = f.get("filename") or "file"
-            content = f.get("content") or b""
-            content_type = (f.get("content_type") or "").lower()
-            is_video = content_type.startswith("video/") or filename.lower().endswith(
-                (".mp4", ".mov", ".avi", ".wmv", ".flv", ".mkv", ".webm"))
-            key = save_upload(content, filename, "baby_album")
-            db.add(AlbumPhoto(album_id=album.id, image=key, is_video=is_video, created_at=datetime.now()))
-        db.commit()
+        if files:
+            for f in files:
+                filename = f.get("filename") or "file"
+                content = f.get("content") or b""
+                content_type = (f.get("content_type") or "").lower()
+                is_video = content_type.startswith("video/") or filename.lower().endswith(
+                    (".mp4", ".mov", ".avi", ".wmv", ".flv", ".mkv", ".webm"))
+                key = save_upload(content, filename, "baby_album")
+                db.add(AlbumPhoto(album_id=album.id, image=key, is_video=is_video, created_at=datetime.now()))
+            db.commit()
+        else:
+            # media_asset_ids 分支 (App 相册实际走的 MinIO 直传流程, 与 Django media_asset_ids 分支一致):
+            # 仅绑定本人 status=uploaded 的资产, 按传入顺序建 AlbumPhoto, 并把资产标记为 bound
+            asset_ids = _parse_media_asset_ids(data.get("media_asset_ids"))
+            if asset_ids:
+                assets = {a.id: a for a in db.query(MediaAsset).filter(
+                    MediaAsset.id.in_(asset_ids),
+                    MediaAsset.user_id == user_id,
+                    MediaAsset.status == "uploaded",
+                ).all()}
+                for aid in asset_ids:
+                    asset = assets.get(aid)
+                    if not asset:
+                        continue
+                    db.add(AlbumPhoto(album_id=album.id, image=asset.object_key,
+                                      is_video=bool(asset.is_video), created_at=datetime.now()))
+                    asset.ref_type = "baby_album"
+                    asset.ref_id = album.id
+                    asset.status = "bound"
+                    asset.updated_at = datetime.now()
+                db.commit()
         db.refresh(album)
         return {"code": 200, "msg": "ok", "data": _album_dict(db, album)}
     except Exception as e:
