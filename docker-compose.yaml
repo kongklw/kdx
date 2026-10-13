@@ -107,7 +107,10 @@ services:
     volumes:
       - ./kdx-ws-be/app:/app/app
       - ./kdx-ws-be/scripts:/app/scripts
-      - ./kdx-ws-be/logs:/app/logs                   # loguru 文件日志(容器内 /app/logs)
+      # loguru 文件日志(容器内 /app/logs)
+      # ⚠️ ECS 部署前必须执行:  chown -R 1000:1000 kdx-ws-be/logs
+      # 容器进程以 appuser(uid=1000) 运行, 宿主机 root 创建的目录必须改 owner 才有写权限
+      - ./kdx-ws-be/logs:/app/logs
       - ./kdx-ws-be/data/models/buffalo_l:/home/appuser/.insightface/models/buffalo_l
       - huggingface_vol:/home/appuser/.cache/huggingface
     networks:

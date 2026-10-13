@@ -73,6 +73,13 @@ module.exports = {
           "^/prod-ai": ""
         }
       },
+      '/file': {
+        // /file/r /file/img 等 file_upload 路由, fastapi 返回 302 重定向到 MinIO presigned URL
+        // ⚠️ 不设 pathRewrite: fastapi 路由本身带 /file/ 前缀, 剥掉会 404
+        target: process.env.VUE_APP_API_TARGET_FASTAPI || "http://localhost:8001",
+        secure: false,
+        changeOrigin: true
+      },
       '/minio': {
         target: process.env.VUE_APP_MINIO_TARGET || "http://47.95.15.228:9000",
         secure: false,

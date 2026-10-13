@@ -1,20 +1,19 @@
 <template>
   <div class="mobile-home">
     <!-- Baby Info Banner -->
-    <div v-if="babyInfo.name" class="baby-info-card" @click="$router.push('/mobile/me')">
+    <div v-if="babyInfo.name" class="baby-info-card">
       <div class="baby-card-content">
         <div class="baby-info-left">
           <div class="baby-title-row">
             <span class="baby-title-text">{{ babyInfo.name || '宝宝' }} {{ babyAge }}</span>
-            <van-icon name="arrow" color="#888" size="14" />
           </div>
-          <div class="baby-growth-tip">
-            <span class="tip-label">宝宝变化:</span>
-            <span class="tip-content">有的宝宝在1岁后会越来越黏人，即使短暂的分离也会让他哭得撕心裂肺。你的...</span>
-            <van-icon name="arrow" color="#ff9a9e" size="12" />
+          <div class="baby-growth-tip" :class="{ 'is-expanded': expandChange }" @click="toggleChangeExpand">
+            <span class="tip-label">宝宝变化</span>
+            <span class="tip-content">{{ babyDevInfo.changeText }}</span>
+            <span class="tip-toggle">{{ expandChange ? '收起' : '展开' }}</span>
           </div>
           <div class="baby-stats-row">
-            75.2-86.2cm | 8.2-13.0kg
+            {{ babyDevInfo.statsText }}
           </div>
         </div>
         <div class="baby-info-right">
@@ -107,6 +106,7 @@
 <script>
 import { dashboardReq, getBabyInfoReq, getBirthdayListReq, saveAppOrderReq } from '@/api/baby'
 import draggable from 'vuedraggable'
+import { getBabyDevInfo } from '@/data/babyGrowthStandards'
 
 const DEFAULT_APP_ORDER = [
   'BreastFeed', 'Temperature', 'BabyPants', 'Sleep', 'Expense', 'Period',
@@ -132,7 +132,8 @@ export default {
       },
       draggableItems: [],
       birthdayReminders: [],
-      hasMounted: false
+      hasMounted: false,
+      expandChange: false
     }
   },
   computed: {
@@ -212,6 +213,32 @@ export default {
       if (!ageStr) return '今天出生'
 
       return ageStr
+    },
+    // 计算宝宝总月龄(0-60+), 用于匹配 WHO 生长标准与发育里程碑
+    babyAgeMonths() {
+      if (!this.babyInfo || !this.babyInfo.birthday) return 0
+      const parts = this.babyInfo.birthday.split('-')
+      const birthYear = parseInt(parts[0], 10)
+      const birthMonth = parseInt(parts[1], 10) - 1 // 0-indexed
+      const birthDay = parseInt(parts[2], 10)
+      if (!birthYear || birthMonth < 0 || !birthDay) return 0
+
+      const birth = new Date(birthYear, birthMonth, birthDay)
+      const now = new Date()
+      now.setHours(0, 0, 0, 0)
+      birth.setHours(0, 0, 0, 0)
+      if (now < birth) return 0
+
+      // 按日历差计算总月龄
+      let months = (now.getFullYear() - birthYear) * 12 + (now.getMonth() - birthMonth)
+      // 当月日数未达生日, 月龄减 1
+      if (now.getDate() < birthDay) months -= 1
+      return Math.max(0, months)
+    },
+    // 根据月龄+性别动态返回 宝宝变化文案 与 身高体重参考范围(WHO 2006)
+    babyDevInfo() {
+      const gender = this.babyInfo && this.babyInfo.gender ? this.babyInfo.gender : 'F'
+      return getBabyDevInfo(this.babyAgeMonths, gender)
     }
   },
   watch: {
@@ -233,6 +260,9 @@ export default {
     }
   },
   methods: {
+    toggleChangeExpand() {
+      this.expandChange = !this.expandChange
+    },
     refresh() {
       this.obtainDashboardData()
       this.fetchBabyInfo()
@@ -531,23 +561,54 @@ export default {
   margin-bottom: 8px;
   display: flex;
   align-items: flex-start;
-  line-height: 1.4;
+  line-height: 1.5;
   backdrop-filter: blur(5px);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.baby-growth-tip:active {
+  background: rgba(255,255,255,0.35);
+}
+.baby-growth-tip.is-expanded {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.baby-growth-tip.is-expanded .tip-content {
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+.baby-growth-tip.is-expanded .tip-toggle {
+  align-self: flex-end;
 }
 
 .tip-label {
   font-weight: bold;
   margin-right: 4px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tip-content {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
-  -webkit-line-clamp: 2; /* Limit to 2 lines */
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  transition: max-height 0.25s ease;
+}
+
+.tip-toggle {
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  padding: 1px 6px;
+  margin-left: 4px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.2);
+  white-space: nowrap;
+  flex-shrink: 0;
+  align-self: center;
 }
 
 .baby-stats-row {
