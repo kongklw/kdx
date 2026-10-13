@@ -11,6 +11,8 @@
 
 ## 本地运行
 
+## docker compose up -d --force-recreate kdx_ws 重新创建容器（场景 修改了变量等配置）
+
 在仓库根目录执行：
 
 ```bash

@@ -47,6 +47,7 @@ def get_settings() -> Settings:
         redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
     else:
         redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
+    print(f'redis url -> {redis_url}')
 
     mysql_user = os.getenv("MYSQL_USER") or ""
     mysql_password = os.getenv("MYSQL_PASSWORD") or ""

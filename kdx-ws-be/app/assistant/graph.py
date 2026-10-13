@@ -77,8 +77,8 @@ def _init_lc():
     return _lc
 
 
-MAX_TOOL_ROUNDS = 5          # ReAct 最大循环轮数(防失控)
-CONFIDENCE_THRESHOLD = 0.6   # 意图置信度阈值，低于走 fallback
+MAX_TOOL_ROUNDS = 5  # ReAct 最大循环轮数(防失控)
+CONFIDENCE_THRESHOLD = 0.6  # 意图置信度阈值，低于走 fallback
 
 # 模块级共享: 工具注册中心 (进程级单例)
 _REGISTRY: Optional[ToolRegistry] = None
@@ -102,16 +102,16 @@ class AssistantState(TypedDict, total=False):
     request_id: str
 
     # 会话
-    messages: List[Any]                # langchain messages (含多轮历史, 由 checkpointer 持久化)
+    messages: List[Any]  # langchain messages (含多轮历史, 由 checkpointer 持久化)
 
     # 意图与路由
-    intent: str                        # data_query / knowledge_qa / chitchat
+    intent: str  # data_query / knowledge_qa / chitchat
     confidence: float
     slots: Dict[str, Any]
     route: str
 
     # 上下文
-    baby_context: str                  # 宝宝信息 + 今日日期 (注入 system prompt)
+    baby_context: str  # 宝宝信息 + 今日日期 (注入 system prompt)
 
     # 工具链路
     tool_rounds: int
@@ -196,6 +196,7 @@ async def _llm_intent(query: str) -> Dict[str, Any]:
     try:
         gw = get_llm_gateway()
         resp = await gw.ainvoke("intent", [HumanMessage(content=prompt)])
+        print(f'_llm_intent resp -> {resp}')
         text = (resp.content or "").strip()
         start, end = text.find("{"), text.rfind("}") + 1
         if start >= 0 and end > start:
@@ -229,11 +230,15 @@ async def entry_node(state: AssistantState) -> Dict[str, Any]:
 
     # 两级意图识别
     rule = _rule_intent(query)
+    print(f'rule -> {rule}')
     if rule:
+
         intent_res = rule
+        print(f'规则匹配的 intent res -> {intent_res}')
     else:
         intent_res = await _llm_intent(query)
-
+        print(f'llm 推断出来的 intent_res -> {intent_res}')
+    print(f'intent_res -> {intent_res}')
     intent = intent_res["intent"]
     confidence = intent_res["confidence"]
     if confidence < CONFIDENCE_THRESHOLD:
@@ -275,7 +280,7 @@ async def _load_baby_context(user_id: int) -> str:
         gender = {"M": "男宝", "F": "女宝"}.get(info.get("gender"), "宝宝")
         return (
             f"今天是 {today.isoformat()}。宝宝信息: 名字={info['name']}, {gender}, "
-            f"生日={info['birthday']}, 月龄={max(months,0)}个月。"
+            f"生日={info['birthday']}, 月龄={max(months, 0)}个月。"
         )
     except Exception as e:
         logger.warning(f"load_baby_context failed: {e}")
@@ -325,11 +330,13 @@ async def agent_node(state: AssistantState) -> Dict[str, Any]:
         from .llm_gateway import get_llm_gateway
         gw = get_llm_gateway()
         # 统一走网关: 工具绑定 + 熔断分桶 + 备用模型降级
+        print(f'graph  schemas-> {schemas}  msgs-> {msgs}')
         resp = await gw.ainvoke_with_tools("agent", schemas, msgs)
     except CircuitOpenError:
         return {"answer": "【系统降级】AI 服务暂时不可用，请稍后重试。", "route": "agent"}
 
     tool_calls = list(getattr(resp, "tool_calls", None) or [])
+    print(f'tools_calls -> {tool_calls}')
 
     # 无工具调用 → 直接回答
     if not tool_calls:
@@ -506,7 +513,7 @@ async def tool_exec_node(state: AssistantState) -> Dict[str, Any]:
         await emit("tool_result", {
             "id": call_id, "name": name,
             "result": json.dumps(data, ensure_ascii=False, default=str)[:500] if result.get("ok")
-                      else f"执行失败: {result.get('error')}",
+            else f"执行失败: {result.get('error')}",
             "ok": result.get("ok", False),
             "retry_hint": result.get("retry_hint", False),
         })
@@ -749,10 +756,10 @@ def build_assistant_graph(checkpointer=None):
     workflow.add_conditional_edges("confirm", route_after_agent, {
         "tools": "tools",
         "give_up": "give_up",
-        "end": END,                # agent 已直接回答 (无工具 / 工具后总结 / reject 已取消)
+        "end": END,  # agent 已直接回答 (无工具 / 工具后总结 / reject 已取消)
     })
 
-    workflow.add_edge("tools", "agent")   # ReAct: 工具执行完回 agent 总结
+    workflow.add_edge("tools", "agent")  # ReAct: 工具执行完回 agent 总结
     workflow.add_edge("rag", END)
     workflow.add_edge("chitchat", END)
     workflow.add_edge("fallback", END)

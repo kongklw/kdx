@@ -48,6 +48,7 @@ class BabyDataRepository:
     # ── 喂奶 ────────────────────────────────────
 
     def query_feed_milk(self, user_id: int, start: datetime, end: datetime) -> Dict[str, Any]:
+        print(f'调用了repository 的 query_feed_milk - {user_id, start, end}')
         rows = self._s.execute(
             select(FeedMilkRow).where(
                 FeedMilkRow.user_id == user_id,
@@ -64,6 +65,7 @@ class BabyDataRepository:
 
     def add_feed_milk(self, user_id: int, feed_time: datetime, milk_volume: int,
                       feed_type: str = "bottle", note: str = "") -> Dict[str, Any]:
+        print(f'调用了repository 的 add_feed_milk - {user_id, feed_time, milk_volume}')
         row = FeedMilkRow(
             user_id=user_id, feed_time=feed_time, milk_volume=int(milk_volume),
             feed_type=feed_type or "bottle", note=note or None,
@@ -156,6 +158,7 @@ class BabyDataRepository:
     # ── 花费 ────────────────────────────────────
 
     def query_expense(self, user_id: int, start: datetime, end: datetime) -> Dict[str, Any]:
+        print(f'query_expense -> {user_id, start, end}')
         rows = self._s.execute(
             select(BabyExpenseRow).where(
                 BabyExpenseRow.user_id == user_id,
@@ -174,6 +177,7 @@ class BabyDataRepository:
 
     def add_expense(self, user_id: int, order_time: datetime, name: str,
                     amount: float, tag: str = "") -> Dict[str, Any]:
+        print(f'add_expense -> {user_id, order_time, name}')
         row = BabyExpenseRow(
             user_id=user_id, order_time=order_time, name=name,
             amount=round(float(amount), 2), tag=tag or None,

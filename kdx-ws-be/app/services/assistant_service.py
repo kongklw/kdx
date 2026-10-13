@@ -19,7 +19,7 @@ from loguru import logger
 from ..assistant.graph import AssistantState, get_compiled_graph
 from ..assistant.runtime import reset_runtime_context, set_runtime_context
 
-CONFIRM_TTL_SECONDS = 300     # 挂起写确认有效期 (秒), 超时需重新发起
+CONFIRM_TTL_SECONDS = 300  # 挂起写确认有效期 (秒), 超时需重新发起
 CANCEL_ANSWER = "好的，已取消本次操作。"
 
 
@@ -61,11 +61,14 @@ class AssistantSession:
                                done_route="data_query(stale_cancelled)")
 
         emit_shim, seen = self._tracked_emit()
+        print(f'emit_shim -> {emit_shim}  seen -> {seen}')
         token = set_runtime_context(user_id=self.user_id, request_id=request_id,
                                     emit=emit_shim, thread_id=self.thread_id)
+        print(f'token -> {token}')
         try:
             result = await self._graph.ainvoke(
                 self._initial_state(query, request_id), self._config())
+            print(f'result -> {result}')
             if await self._handle_interrupt(result, request_id):
                 return  # HITL 挂起, 等待 confirm (不发 query_done)
             await self._emit("query_done", self._done_payload(result, request_id))

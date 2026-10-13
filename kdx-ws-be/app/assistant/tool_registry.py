@@ -29,6 +29,7 @@ class ToolMeta:
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, ToolMeta] = {}
+        print(f'init tools -> {self._tools}')
 
     def register(self, meta: ToolMeta) -> None:
         self._tools[meta.name] = meta
@@ -104,7 +105,9 @@ class ToolRegistry:
         防线2: 超时控制 → 防单个慢 SQL 卡住 ReAct 轮次
         防线3: 异常统一包装 → {"ok": False, "error": ...}
         """
+        print(f'execute -> {name} args -> {args}')
         meta = self._tools.get(name)
+        print(f'meta ->{meta}')
         if meta is None:
             return {"ok": False, "error": f"tool not found: {name}"}
         if not meta.enabled:
@@ -128,5 +131,6 @@ def build_default_registry() -> ToolRegistry:
     """构建 Assistant 默认工具集（具体工具定义见 tools.py 的 register_baby_tools）"""
     from .tools import register_baby_tools
     registry = ToolRegistry()
+    print(f'build_default_registry -> {registry}')
     register_baby_tools(registry)
     return registry

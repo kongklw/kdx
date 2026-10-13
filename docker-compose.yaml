@@ -1,10 +1,11 @@
 # KDX ECS 部署编排 (纯 docker compose 手动管理)
+# ⚠️ 2026-10-02 Django(kdx-be) 已全面迁移至 FastAPI(kdx-ws-be)
+#    原 web(Django) 服务块已注释留存(见下方注释), 不再部署
 # 常用命令:
 #   构建并启动        docker compose up -d --build
-#   重建单个服务      docker compose up -d --build web
-#   查看日志          docker compose logs -f web
-#   Django 迁移       docker compose exec web python manage.py migrate
-#   收集静态文件      docker compose exec web python manage.py collectstatic --noinput
+#   重建单个服务      docker compose up -d --build kdx_ws
+#   查看应用日志      docker compose logs -f kdx_ws
+#   查看文件日志      tail -f kdx-ws-be/logs/kdx-ws-be_$(date +%Y-%m-%d).log
 #   前端重新构建      cd kdx-fe && npm run build  (nginx 通过卷挂载直接读取 dist)
 
 volumes:
@@ -73,25 +74,27 @@ services:
       start_period: 30s
     logging: *default-logging
 
-  web:
-    build: ./kdx-be
-    expose:
-      - "8000"
-    volumes:
-      - ./kdx-be:/home/kdx-be
-      - media_vol:/home/kdx-be/media
-    networks:
-      - nginx_network
-      - db_network
-      - redis_network
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    container_name: kdx-be
-    logging: *default-logging
+  # [已废弃 2026-10-02] Django 服务, 已全面迁移至 kdx-ws-be(FastAPI)
+  # 如需临时回滚, 取消下方注释即可 (需确保 kdx-be 源码仍在)
+  # web:
+  #   build: ./kdx-be
+  #   expose:
+  #     - "8000"
+  #   volumes:
+  #     - ./kdx-be:/home/kdx-be
+  #     - media_vol:/home/kdx-be/media
+  #   networks:
+  #     - nginx_network
+  #     - db_network
+  #     - redis_network
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   container_name: kdx-be
+  #   logging: *default-logging
 
   kdx_ws:
     build:
@@ -104,6 +107,7 @@ services:
     volumes:
       - ./kdx-ws-be/app:/app/app
       - ./kdx-ws-be/scripts:/app/scripts
+      - ./kdx-ws-be/logs:/app/logs                   # loguru 文件日志(容器内 /app/logs)
       - ./kdx-ws-be/data/models/buffalo_l:/home/appuser/.insightface/models/buffalo_l
       - huggingface_vol:/home/appuser/.cache/huggingface
     networks:
@@ -144,6 +148,6 @@ services:
     restart: unless-stopped
     container_name: kdx-nginx
     depends_on:
-      - web
+      # - web        # [已废弃 2026-10-02] Django, 已迁移至 kdx-ws-be
       - kdx_ws
     logging: *default-logging

@@ -44,7 +44,7 @@ def _build_profiles() -> Dict[str, LLMProfile]:
     return {
         "agent": LLMProfile(
             name="agent",
-            model=os.getenv("ASSISTANT_MODEL", "qwen3.7-plus"),
+            model=os.getenv("ASSISTANT_MODEL"),
             temperature=0.3,
             streaming=False,
             fallback_model=os.getenv("ASSISTANT_MODEL_FALLBACK", "qwen-turbo"),
@@ -52,21 +52,21 @@ def _build_profiles() -> Dict[str, LLMProfile]:
         ),
         "rag": LLMProfile(
             name="rag",
-            model=os.getenv("RAG_MODEL", "qwen3.7-plus"),
+            model=os.getenv("RAG_MODEL"),
             temperature=0.0,
             streaming=True,
             description="RAG 知识问答生成 (流式)",
         ),
         "chitchat": LLMProfile(
             name="chitchat",
-            model=os.getenv("CHITCHAT_MODEL", "qwen3.7-plus"),
+            model=os.getenv("CHITCHAT_MODEL"),
             temperature=0.5,
             streaming=True,
             description="闲聊 (流式)",
         ),
         "intent": LLMProfile(
             name="intent",
-            model=os.getenv("INTENT_MODEL", "qwen-turbo"),
+            model=os.getenv("INTENT_MODEL"),
             temperature=0.0,
             streaming=False,
             description="意图分类 (廉价小模型)",
@@ -133,6 +133,26 @@ class LLMGateway:
             )
         return self._breakers[profile_name]
 
+    @staticmethod
+    def _is_degradable(exc: BaseException) -> bool:
+        """判断异常是否值得立即换备用模型重试 (而非等熔断器打开)。
+
+        覆盖: 403 配额/权限 (AllocationQuota.FreeTierOnly)、429 限流、
+        5xx 服务端错误、超时、连接失败。这些错误下换同账号另一模型
+        (免费额度独立计算) 通常即可恢复。
+        """
+        status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+        if isinstance(status, int):
+            if status == 429 or status == 403 or 500 <= status < 600:
+                return True
+        # 类名兜底: 兼容 openai SDK 不同版本
+        degradable_names = {
+            "RateLimitError", "PermissionDeniedError",
+            "InternalServerError", "APIStatusError", "APITimeoutError",
+            "APIConnectionError", "ServiceUnavailableError",
+        }
+        return type(exc).__name__ in degradable_names
+
     def get(self, profile: str) -> Any:
         """获取指定 profile 的 LLM 实例 (带熔断保护, 无工具绑定)"""
         ChatOpenAI = self._init_lc()["ChatOpenAI"]
@@ -179,6 +199,16 @@ class LLMGateway:
                 logger.warning(f"[{profile}] circuit open, trying fallback: {p.fallback_model}")
                 return await self._invoke_fallback(profile, p, messages, usage, t0, **kw)
             raise
+        except Exception as e:
+            # 主模型直接失败 (403 配额耗尽 / 429 限流 / 5xx 等): 立即降级,
+            # 不必等熔断器打开 (熔断需累计 min_calls 次, 此前失败会直接暴露给用户)
+            if p.fallback_model and p.fallback_model != p.model and self._is_degradable(e):
+                logger.warning(
+                    f"[{profile}] primary {p.model} failed ({type(e).__name__}: {e}), "
+                    f"trying fallback: {p.fallback_model}"
+                )
+                return await self._invoke_fallback(profile, p, messages, usage, t0, **kw)
+            raise
 
     async def ainvoke_with_tools(self, profile: str, tool_schemas: list, messages, **kw) -> Any:
         """带工具绑定的 LLM 调用 (Function Calling, 带熔断 + 分级降级)
@@ -201,6 +231,15 @@ class LLMGateway:
             # 熔断 → 尝试备用模型 (同样带工具绑定)
             if p.fallback_model and p.fallback_model != p.model:
                 logger.warning(f"[{profile}] circuit open, trying fallback with tools: {p.fallback_model}")
+                return await self._invoke_fallback_with_tools(profile, p, tool_schemas, messages, usage, t0, **kw)
+            raise
+        except Exception as e:
+            # 主模型直接失败 (403 配额耗尽 / 429 限流 / 5xx 等): 立即降级到带工具的备用模型
+            if p.fallback_model and p.fallback_model != p.model and self._is_degradable(e):
+                logger.warning(
+                    f"[{profile}] primary {p.model} failed with tools ({type(e).__name__}: {e}), "
+                    f"trying fallback: {p.fallback_model}"
+                )
                 return await self._invoke_fallback_with_tools(profile, p, tool_schemas, messages, usage, t0, **kw)
             raise
 

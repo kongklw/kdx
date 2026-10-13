@@ -3,16 +3,13 @@
 Redis list 存储, 降级进程内列表; 复用 resilience.py 的连接模式。
 """
 import json
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 
 class ChatHistoryService:
-    """用户聊天历史读写, 按 user_id 隔离, TTL 7 天。
-
-    首次 get_instance(redis_url) 时传入 settings.redis_url;
-    后续无参调用返回已缓存的单例。
-    """
+    """用户聊天历史读写, 按 user_id 隔离, TTL 7 天。"""
 
     _instance: Optional["ChatHistoryService"] = None
 
@@ -29,27 +26,16 @@ class ChatHistoryService:
         self._memory: Dict[str, List[dict]] = {}  # 降级: user_id -> [msg, ...]
         self._TTL = 7 * 24 * 3600
         self._MAX = 500           # 每用户最多保留 500 条
-        self._retry_at = 0.0      # 下次允许重连 Redis 的时间戳 (0=立即可试)
 
     async def _get_redis(self):
-        # 已初始化: 直接返回 (False=降级中)
         if self._redis is not None:
-            if self._redis is False:
-                # 降级中, 但到重试时间则重新尝试连接
-                if time.time() < self._retry_at:
-                    return None
-                self._redis = None  # 重置, 走下方重连逻辑
-            else:
-                return self._redis
-        # 首次连接或重试
+            return self._redis if self._redis is not False else None
         try:
             import redis.asyncio as aioredis
-            client = aioredis.from_url(self._redis_url, decode_responses=True)
-            await client.ping()
-            self._redis = client
+            self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
+            await self._redis.ping()
         except Exception:
             self._redis = False
-            self._retry_at = time.time() + 30  # 30s 后允许重试
         return self._redis if self._redis is not False else None
 
     def _key(self, user_id: int) -> str:

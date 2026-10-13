@@ -20,6 +20,18 @@ services:
       - DB_NAME=kdx
       - DB_USER=root
       - DB_PASSWORD=password
+      # ── AI (DashScope) 配置: 从部署机 .env / shell 读取, 不写死密钥 ──
+      # 不注入这些变量时代码会回退默认 qwen3.7-plus (其免费额度已耗尽会 403),
+      # 故必须显式透传; 默认值统一用实测有免费额度的 qwen-turbo 兜底。
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - ASSISTANT_MODEL=${ASSISTANT_MODEL:-qwen-turbo}
+      - ASSISTANT_MODEL_FALLBACK=${ASSISTANT_MODEL_FALLBACK:-qwen-turbo}
+      - RAG_MODEL=${RAG_MODEL:-qwen-turbo}
+      - CHITCHAT_MODEL=${CHITCHAT_MODEL:-qwen-turbo}
+      - INTENT_MODEL=${INTENT_MODEL:-qwen-turbo}
+      - CONDENSE_MODEL=${CONDENSE_MODEL:-qwen-turbo}
+      - AI_GEN_MODEL=${AI_GEN_MODEL:-qwen-turbo}
+      - AI_VISION_MODEL=${AI_VISION_MODEL:-qwen-vl-max}
     depends_on:
       - redis
       - mysql
